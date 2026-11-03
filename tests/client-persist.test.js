@@ -85,6 +85,18 @@ function createFetchStub() {
 
 /** 迷你 React：函数组件 + 真 hooks。返回 { tree, findElement, texts, click, change, settle }。 */
 async function mountPanel(seed) {
+  // 存一份原始全局：同一个进程里如果跑了别的测试文件（tests/index.js 那条
+  // 目录入口），这里替换过的 setTimeout/fetch 不还回去会把它们一起带偏。
+  const savedGlobals = {
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+    setInterval: globalThis.setInterval,
+    clearInterval: globalThis.clearInterval,
+    fetch: globalThis.fetch,
+    localStorage: globalThis.localStorage,
+    sessionStorage: globalThis.sessionStorage,
+    document: globalThis.document,
+  }
   installTimerStubs()
   globalThis.document = globalThis.document || { body: { style: {} }, addEventListener() {}, removeEventListener() {} }
   const storage = createLocalStorage(seed)
@@ -248,13 +260,14 @@ async function mountPanel(seed) {
   let tree = null
   const trace = []
 
-  // 只保留 client.js 里的那一帧，别的都是 runner 自己的噪音。
+  // setState 调用点采样。只在撞到安全阀时打印一次——正常路径上这是纯开销，
+  // 但真出循环时没有它就完全不知道是谁在反复触发（这一轮调试就吃过这个亏）。
   function stackSite() {
-    const lines = String(new Error('setState').stack || '').split('\n').slice(2, 26)
-    return lines.map((line) => line.trim().replace(/^at\s+/, '').replace(/^.*client\.js/, 'c')).join(' <- ')
+    const lines = String(new Error('setState').stack || '').split('\n').slice(2, 6)
+    return lines.map((line) => line.trim().replace(/^at\s+/, '').replace(/^.*client\.js/, 'client.js')).join(' <- ')
   }
 
-  function traceTop(limit = 8) {
+  function traceTop(limit = 6) {
     const counts = new Map()
     for (const site of trace) counts.set(site, (counts.get(site) || 0) + 1)
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([site, count]) => count + '× ' + site).join('\n  ')
@@ -267,8 +280,7 @@ async function mountPanel(seed) {
     // 只是防死循环的安全阀：正常路径上每轮 settle 只会有个位数次渲染。
     if (guard > 20000) {
       rendering = false
-      process.stderr.write('RENDER TRACE (' + trace.length + ' setState)\n  ' + traceTop() + '\n')
-      throw new Error('render loop: 面板在挂载后被反复重渲染')
+      throw new Error('render loop: 面板在挂载后被反复重渲染\n  setState 调用点：\n  ' + traceTop())
     }
     try {
       // 上一轮攒下的 state 更新在这里统一提交（真 React 也是这个时机）。
@@ -392,7 +404,13 @@ async function mountPanel(seed) {
       render()
     },
     pageState: () => JSON.parse(storage.getItem(PAGE_STORE) || 'null'),
-    cleanup: () => { for (const fn of cleanups) fn() },
+    cleanup: () => {
+      for (const fn of cleanups) fn()
+      for (const [key, value] of Object.entries(savedGlobals)) {
+        if (value === undefined) delete globalThis[key]
+        else globalThis[key] = value
+      }
+    },
   }
 }
 

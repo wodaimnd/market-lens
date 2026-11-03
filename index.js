@@ -53,16 +53,35 @@ import { OpLog } from './lib/op-log.js'
 import {
   BUILT_IN_PRESETS,
   BUILT_IN_RULES,
+  METRIC_REGISTRY,
+  NORM_REGISTRY,
   MarketRulesError,
   RULES_FILE,
+  RULES_LIBRARY_FILE,
+  RULES_LIBRARY_VERSION,
+  activeEntry,
+  countFactors,
+  describeEntry,
+  findEntry,
+  libraryChoices,
+  mergeLibrary,
+  newRuleEntryId,
   normalizeRules,
   rulesDocument,
   rulesTemplate,
   prepareMetrics,
   scoreGroup,
   scoreLabelFromRules,
+  serializeLibrary,
   validateRules,
 } from './lib/rules.js'
+
+/** 模版页上「三组分数是干什么的」的说明：界面直接渲染，不再只给一段长文本。 */
+const GROUP_GUIDE = [
+  { key: 'market', label: { zh: '市场风评', en: 'Market score' }, desc: { zh: '主排序分。表格「市场风评」列用的就是它。', en: 'Primary score; drives the Market column.' } },
+  { key: 'community', label: { zh: '民间风评', en: 'Community score' }, desc: { zh: '社区活跃分。没有 Star 数的条目不显示这一列。', en: 'Community activity; hidden when a row has no stars.' } },
+  { key: 'heat', label: { zh: '热度', en: 'Heat' }, desc: { zh: '默认排序键。安装量 / Star / 下载量加权，缺项自动重新分配权重。', en: 'Default sort key; missing metrics re-distribute weight.' } },
+]
 
 const ROUTE = '/api/market-lens'
 const MAX_BODY = 1024 * 1024
@@ -78,6 +97,8 @@ const STANDARD_MANIFEST_VERSION = '1.0.0'
 const SYNC_TIMEOUT_MS = 10 * 60 * 1000
 const SYNC_TIMEOUT_CODE = 'SYNC_TIMEOUT'
 const SYNC_TIMEOUT_MESSAGE = '同步超过 ' + Math.round(SYNC_TIMEOUT_MS / 60_000) + ' 分钟总时长上限'
+// 自定义规则份数上限：下拉框再长就没法用了，且每条都要参与全表重算。
+const MAX_USER_ENTRIES = 20
 
 // 导出配置时带上插件版本号：团队共享的 JSON 至少要能看出是哪一代面板导出的
 const PLUGIN_VERSION = (() => {
@@ -306,6 +327,33 @@ const summarizeInstallResult = (result) => {
     if (result[key] !== undefined) out[key] = result[key]
   }
   return out
+}
+
+/**
+ * 从 spec 里猜出这条安装最终装进去的包名。
+ *
+ * installBundle 的返回值里通常带 name（或 bundle / target），但那些字段
+ * 在不同版本的宿主上不一定都有；而「批准构建」之类的分支又不返回结果。
+ * 所以先从返回值取，取不到再从 spec 里解析（pkg@1.2.3 / @scope/pkg@1.2.3 /
+ * github:owner/repo#path:… 都要能折出来）。
+ */
+export function packageNameFromSpec(spec) {
+  const text = typeof spec === 'string' ? spec.trim() : ''
+  if (!text) return null
+  // 本地路径 / link: / file: 这类没有「包名」可判，交给调用方跳过挂载校验
+  if (/^(?:link|file|portal|workspace):/i.test(text) || /^[a-z]:[\\/]/i.test(text) || /^\.{0,2}[\\/]/.test(text)) return null
+  if (/^github:/i.test(text) || /^git\+|^git@/i.test(text) || /^https?:\/\/github\.com\//i.test(text)) {
+    const repo = /^(?:github:|git\+https:\/\/github\.com\/|https?:\/\/github\.com\/)([^/#]+)\/([^/#]+?)(?:\.git)?(?:[#/?].*)?$/i.exec(text)
+    // GitHub 安装的包名默认取仓库名；真正的包名由仓库里的 package.json 决定，
+    // 猜错就只是「校验不出来」，不会误判成未挂载
+    return repo ? repo[2].replace(/\.git$/i, '').toLowerCase() : null
+  }
+  if (text.startsWith('@')) {
+    const scoped = /^(@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*)(?:@[^\s]+)?$/i.exec(text)
+    return scoped ? scoped[1].toLowerCase() : null
+  }
+  const plain = /^([a-z0-9][a-z0-9._-]*)(?:@[^\s]+)?$/i.exec(text)
+  return plain ? plain[1].toLowerCase() : null
 }
 
 const sendJson = (res, status, body) => {
@@ -548,75 +596,158 @@ export function apply(ctx) {
     return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes())
   }
 
+  // 规则库：所有可选口径都存成条目，用户在下拉框里选一个启用。
+  // 老版本的「单文件」口径（scoring-rules.json）在首次启动时会被迁进来，
+  // 迁完即删，避免两份真相长期并存。
   const rulesPath = path.join(cacheDirectory(), RULES_FILE)
-  const initialRules = loadRulesFile()
-  let scoringRules = initialRules.rules
-  let rulesSource = initialRules.source
-  let rulesSavedAt = initialRules.savedAt
-  let rulesIssue = initialRules.issue
+  const libraryPath = path.join(cacheDirectory(), RULES_LIBRARY_FILE)
+  let rulesLibrary = loadRulesLibrary()
+  let scoringRules = activeEntry(rulesLibrary).rules
+  let rulesIssue = rulesLibrary.issues.length ? rulesLibrary.issues[0] : null
   let appliedRulesFingerprint = null
   const rulesListeners = new Set()
 
-  function loadRulesFile() {
+  function loadRulesLibrary() {
     // readJson 把「文件不存在」和「JSON 坏了」都归成 null，但这两件事对用户
     // 完全不是一回事：前者是没自定义，后者是改坏了——必须说清楚，否则规则
     // 悄悄退回内置口径，用户只会觉得「我改的没用」。
-    if (!fs.existsSync(rulesPath)) return { rules: BUILT_IN_RULES, source: 'default', savedAt: null, issue: null }
-    let raw
+    const stored = fs.existsSync(libraryPath) ? readJson(libraryPath) : null
+    let migrated = null
+    let base = stored
+
+    if (!base && fs.existsSync(rulesPath)) {
+      // 0.6.0 及以前的单文件口径：搬成库里的一个用户条目并设为当前。
+      const old = (() => {
+        try { return readJson(rulesPath) } catch { return null }
+      })()
+      if (old) {
+        const result = validateRules(old)
+        if (result.ok) {
+          migrated = {
+            id: 'migrated-' + newRuleEntryId(result.rules.name || 'legacy'),
+            name: result.rules.name || '旧版自定义规则',
+            description: result.rules.description || '从单文件规则迁移而来',
+            savedAt: typeof old.updatedAt === 'string' ? old.updatedAt : new Date().toISOString(),
+            rules: result.rules,
+          }
+          opLog.info('rules.migrated', { name: migrated.name, id: migrated.id })
+        } else {
+          opLog.warn('rules.migrate.skipped', { detail: result.issues.join('；') })
+        }
+      }
+    }
+
+    const library = mergeLibrary({
+      activeId: migrated ? migrated.id : (base?.activeId || null),
+      entries: [...(base?.entries || []), ...(migrated ? [migrated] : [])],
+      migratedFrom: base?.migratedFrom || (migrated ? 'scoring-rules.json' : null),
+    })
+
+    if (!base || migrated) {
+      try {
+        writeJsonAtomic(libraryPath, { ...serializeLibrary(library), version: RULES_LIBRARY_VERSION })
+        // 迁移成功后删掉旧文件：留着它只会让「到底哪份在生效」变成一个谜。
+        if (migrated && fs.existsSync(rulesPath)) fs.rmSync(rulesPath, { force: true })
+      } catch (error) {
+        opLog.warn('rules.library.save.failed', { detail: message(error) })
+      }
+    }
+    if (library.issues.length) opLog.warn('rules.library.issues', { detail: library.issues.join('；') })
+    return library
+  }
+
+  function saveRulesLibrary() {
     try {
-      raw = readJson(rulesPath)
+      writeJsonAtomic(libraryPath, { ...serializeLibrary(rulesLibrary), version: RULES_LIBRARY_VERSION })
+      return { ok: true }
     } catch (error) {
-      opLog.error('rules.load.failed', { detail: message(error) })
-      return { rules: BUILT_IN_RULES, source: 'default', savedAt: null, issue: '规则文件读取失败，已回退内置规则：' + message(error) }
+      opLog.error('rules.library.save.failed', { detail: message(error) })
+      return { ok: false, error: message(error) }
     }
-    if (!raw) {
-      opLog.error('rules.load.failed', { detail: 'JSON 解析失败', path: rulesPath })
-      return { rules: BUILT_IN_RULES, source: 'default', savedAt: null, issue: '规则文件不是合法 JSON，已回退内置规则；请重新上传或点「恢复内置规则」。' }
-    }
-    const result = validateRules(raw)
-    if (!result.ok) {
-      opLog.error('rules.load.invalid', { detail: result.issues.join('；') })
-      return { rules: BUILT_IN_RULES, source: 'default', savedAt: null, issue: '规则文件不合法，已回退内置规则：' + result.issues[0] }
-    }
-    return { rules: result.rules, source: 'file', savedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null, issue: null }
   }
 
   function rulesFingerprint() {
     return createHash('sha1').update(JSON.stringify(scoringRules)).digest('hex').slice(0, 12)
   }
 
-  function factorCountOf(rules) {
-    let count = 0
-    for (const name of ['market', 'community', 'heat']) {
-      count += (rules[name]?.factors?.length || 0) + (rules[name]?.fallback?.length || 0)
-    }
-    return count
-  }
-
-  /** 状态里只放指纹和摘要：规则全文有几十 KB，不能每 20 秒随 status 重发一遍。 */
+  /** 状态里只放摘要与下拉选项：规则全文有几十 KB，不能每 20 秒随 status 重发一遍。 */
   function rulesSummary() {
+    const entry = activeEntry(rulesLibrary)
     return {
       fingerprint: rulesFingerprint(),
-      name: scoringRules.name,
-      description: scoringRules.description || '',
-      source: rulesSource,
-      savedAt: rulesSavedAt,
+      activeId: rulesLibrary.activeId,
+      name: entry ? entry.name : scoringRules.name,
+      description: entry ? entry.description : (scoringRules.description || ''),
+      origin: entry ? entry.origin : 'builtin',
+      source: entry ? (entry.origin === 'user' ? 'file' : entry.origin) : 'default',
+      savedAt: entry ? entry.savedAt : null,
       issue: rulesIssue,
-      isDefault: rulesSource === 'default',
+      isDefault: rulesLibrary.activeId === 'builtin:default',
       labels: { ...scoringRules.labels },
-      factorCount: factorCountOf(scoringRules),
-      presets: BUILT_IN_PRESETS.map((preset) => ({ id: preset.id, name: preset.name, description: preset.description })),
+      factorCount: countFactors(scoringRules),
+      // 下拉框的全部候选：内置 + 预设 + 用户上传，都在这一个列表里
+      choices: libraryChoices(rulesLibrary),
+      entryCount: rulesLibrary.entries.length,
+      userCount: rulesLibrary.entries.filter((item) => item.origin === 'user').length,
+      migratedFrom: rulesLibrary.migratedFrom,
     }
-  }
-
-  function rulesBody() {
-    return { summary: rulesSummary(), rules: scoringRules }
   }
 
   function onRulesChanged(listener) {
     if (typeof listener !== 'function') return () => {}
     rulesListeners.add(listener)
     return () => rulesListeners.delete(listener)
+  }
+
+  function notifyRulesChanged(payload) {
+    for (const listener of rulesListeners) {
+      try {
+        listener(payload)
+      } catch {
+        // 监听者出错不影响换规则本身
+      }
+    }
+  }
+
+  /**
+   * 装完之后核对「挂载」这一步。
+   *
+   * 为什么需要它：pluginManager.installBundle 内部会调 selectBundle 把包装进
+   * `dsh.profile.bundles`；只有进了这个列表，下次启动 loader 才会加载它。
+   * 这一步是隐式的，安静失败时前端完全看不出来 —— 用户看到「安装成功」，
+   * 重启后却发现插件根本不存在，这正是最难查的那类问题。
+   *
+   * 判定口径：
+   *   - 拿不到包名（本地路径 / link / 猜不出的 spec）→ 跳过，不误报；
+   *   - 包名在 bundles 里 → mounted；
+   *   - 不在 → 明确回报，并给出重启后仍不出现时的下一步。
+   *
+   * @returns {{packageName: string|null, mounted: boolean, checked: boolean, reason: string|null, bundles: string[]}}
+   */
+  function inspectMount(spec, result) {
+    const fromResult = result && typeof result === 'object'
+      ? [result.bundle, result.name, result.target, result.packageName].find((value) => typeof value === 'string' && value.trim())
+      : null
+    const packageName = (fromResult || packageNameFromSpec(spec) || '').trim().toLowerCase() || null
+    if (!packageName) {
+      return { packageName: null, mounted: false, checked: false, reason: 'unresolved-package-name', bundles: [] }
+    }
+    let manifest
+    try {
+      manifest = readJson(path.join(profileDir, 'package.json')) || {}
+    } catch (error) {
+      return { packageName, mounted: false, checked: false, reason: 'profile-unreadable: ' + message(error), bundles: [] }
+    }
+    const bundles = Array.isArray(manifest?.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
+    const lowered = bundles.map((entry) => String(entry).toLowerCase())
+    const mounted = lowered.includes(packageName)
+    return {
+      packageName,
+      mounted,
+      checked: true,
+      reason: mounted ? null : 'not-in-bundles',
+      bundles: lowered,
+    }
   }
 
   /**
@@ -659,68 +790,126 @@ export function apply(ctx) {
   }
 
   /**
-   * 换规则：校验 → 写盘 → 立即重算。
-   * 写盘失败不落地内存状态，沿用 settings.set 那套「失败即回滚」的口径。
+   * 启用库里的某一条。切换不动库本身（除了 activeId），所以用户可以在
+   * 「自己的口径」和「内置」之间来回对比，上传的东西一直都在。
    */
-  function commitRules(input, { source = 'file', presetId = null } = {}) {
+  function activateEntry(id, { source = null } = {}) {
+    const entry = findEntry(rulesLibrary, id)
+    if (!entry) return { ok: false, error: '规则库里没有这一条：' + id }
+    const previousActive = rulesLibrary.activeId
+    rulesLibrary.activeId = entry.id
+    scoringRules = entry.rules
+    rulesIssue = null
+    const saved = saveRulesLibrary()
+    if (!saved.ok) {
+      // 写盘失败就回滚，否则下次启动会读回一个界面上看不见的 activeId
+      rulesLibrary.activeId = previousActive
+      scoringRules = activeEntry(rulesLibrary).rules
+      return { ok: false, error: '规则选择未保存：' + saved.error }
+    }
+    const changed = ensureRulesApplied({ force: true })
+    opLog.info('rules.activated', {
+      id: entry.id,
+      name: entry.name,
+      origin: entry.origin,
+      factors: countFactors(entry.rules),
+      rows: rows.length,
+      changed,
+      source: source || 'manual',
+    })
+    notifyRulesChanged({ summary: rulesSummary(), rows: rows.length, changed })
+    return { ok: true, summary: rulesSummary(), rules: scoringRules, recomputed: changed, rows: rows.length, activeId: entry.id }
+  }
+
+  /**
+   * 上传一份规则：校验 → 存进规则库 → 启用。
+   *
+   * 存进去而不是覆盖当前规则，是为了「上传多份，随时切回」。
+   * 同名会自动加序号，避免下拉框里出现两条一模一样的名字。
+   */
+  function addUserEntry(input, { name = null, description = null, activate = true } = {}) {
     const result = validateRules(input)
     if (!result.ok) {
       opLog.warn('rules.rejected', { detail: result.issues.join('；') })
       return { ok: false, error: '规则文件不合法：' + result.issues[0], issues: result.issues }
     }
-    const next = result.rules
-    const document = { ...rulesDocument(next), updatedAt: new Date().toISOString() }
-    try {
-      writeJsonAtomic(rulesPath, document)
-    } catch (error) {
-      opLog.error('rules.save.failed', { detail: message(error) })
-      return { ok: false, error: '规则写盘失败：' + message(error), issues: [] }
+    const rules = result.rules
+    if (rulesLibrary.entries.filter((entry) => entry.origin === 'user').length >= MAX_USER_ENTRIES) {
+      return { ok: false, error: '自定义规则最多 ' + MAX_USER_ENTRIES + ' 份，请先删掉几份再上传', issues: [] }
     }
-    scoringRules = next
-    rulesSource = source
-    rulesSavedAt = document.updatedAt
-    rulesIssue = null
-    const changed = ensureRulesApplied({ force: true })
-    opLog.info('rules.applied', {
-      name: next.name,
-      source,
-      presetId,
-      factors: factorCountOf(next),
-      labels: [next.labels.excellent, next.labels.good, next.labels.fair].join('/'),
-      rows: rows.length,
-      fingerprint: rulesFingerprint(),
+    const baseName = (typeof name === 'string' && name.trim() ? name.trim() : rules.name || '自定义规则').slice(0, 80)
+    const finalName = uniqueEntryName(baseName)
+    const entry = {
+      id: newRuleEntryId(finalName),
+      name: finalName,
+      description: (typeof description === 'string' && description.trim() ? description.trim() : (rules.description || '')).slice(0, 400),
+      origin: 'user',
+      builtin: false,
+      savedAt: new Date().toISOString(),
+      rules: { ...rules, name: finalName },
+    }
+    const previousActive = rulesLibrary.activeId
+    rulesLibrary.entries = [...rulesLibrary.entries, entry]
+    if (activate) rulesLibrary.activeId = entry.id
+    const saved = saveRulesLibrary()
+    if (!saved.ok) {
+      rulesLibrary.entries = rulesLibrary.entries.filter((item) => item.id !== entry.id)
+      rulesLibrary.activeId = previousActive
+      return { ok: false, error: '规则未保存：' + saved.error, issues: [] }
+    }
+    let changed = false
+    if (activate) {
+      scoringRules = entry.rules
+      rulesIssue = null
+      changed = ensureRulesApplied({ force: true })
+    }
+    opLog.info('rules.added', {
+      id: entry.id,
+      name: entry.name,
+      factors: countFactors(entry.rules),
+      activated: activate,
+      userCount: rulesLibrary.entries.filter((item) => item.origin === 'user').length,
     })
-    for (const listener of rulesListeners) {
-      try {
-        listener({ summary: rulesSummary(), rows: rows.length, changed })
-      } catch {
-        // 监听者出错不影响换规则本身
-      }
-    }
-    return { ok: true, rules: next, summary: rulesSummary(), recomputed: changed, rows: rows.length }
+    notifyRulesChanged({ summary: rulesSummary(), rows: rows.length, changed })
+    return { ok: true, entry: { id: entry.id, name: entry.name }, summary: rulesSummary(), rules: entry.rules, activeId: rulesLibrary.activeId, recomputed: changed, rows: rows.length, renamed: finalName !== baseName }
   }
 
-  /** 回到内置规则：删掉文件而不是写一份副本，避免「自定义文件」和「默认」长期并存。 */
-  function resetRules() {
-    try {
-      if (fs.existsSync(rulesPath)) fs.rmSync(rulesPath, { force: true })
-    } catch (error) {
-      return { ok: false, error: '删除规则文件失败：' + message(error) }
+  /** 同名自动加 (2) (3)：下拉框里两条一模一样的名字没法选。 */
+  function uniqueEntryName(baseName) {
+    const taken = new Set(rulesLibrary.entries.map((entry) => entry.name))
+    if (!taken.has(baseName)) return baseName
+    for (let index = 2; index < 100; index += 1) {
+      const candidate = baseName + ' (' + index + ')'
+      if (!taken.has(candidate)) return candidate
     }
-    scoringRules = BUILT_IN_RULES
-    rulesSource = 'default'
-    rulesSavedAt = null
-    rulesIssue = null
-    const changed = ensureRulesApplied({ force: true })
-    opLog.info('rules.reset', { rows: rows.length, changed })
-    for (const listener of rulesListeners) {
-      try {
-        listener({ summary: rulesSummary(), rows: rows.length, changed })
-      } catch {
-        // 同上
-      }
+    return baseName + ' ' + new Date().toISOString().slice(11, 19)
+  }
+
+  /** 删掉库里的一条自定义规则。内置与预设不许删（只能不选它）。 */
+  function removeEntry(id) {
+    const entry = findEntry(rulesLibrary, id)
+    if (!entry) return { ok: false, error: '规则库里没有这一条：' + id }
+    if (entry.builtin) return { ok: false, error: '内置规则不能删除，只能切换到别的规则' }
+    const index = rulesLibrary.entries.findIndex((item) => item.id === id)
+    const removed = rulesLibrary.entries[index]
+    const wasActive = rulesLibrary.activeId === id
+    rulesLibrary.entries = rulesLibrary.entries.filter((item) => item.id !== id)
+    if (wasActive) {
+      // 删掉正在用的那份：回退到内置默认，别留一个指向已删除条目的 activeId
+      rulesLibrary.activeId = 'builtin:default'
+      scoringRules = activeEntry(rulesLibrary).rules
     }
-    return { ok: true, summary: rulesSummary(), recomputed: changed }
+    const saved = saveRulesLibrary()
+    if (!saved.ok) {
+      rulesLibrary.entries.splice(index, 0, removed)
+      rulesLibrary.activeId = wasActive ? id : rulesLibrary.activeId
+      scoringRules = activeEntry(rulesLibrary).rules
+      return { ok: false, error: '规则未删除：' + saved.error }
+    }
+    const changed = wasActive ? ensureRulesApplied({ force: true }) : false
+    opLog.info('rules.removed', { id: removed.id, name: removed.name, wasActive, changed, userCount: rulesLibrary.entries.filter((item) => item.origin === 'user').length })
+    notifyRulesChanged({ summary: rulesSummary(), rows: rows.length, changed })
+    return { ok: true, summary: rulesSummary(), removed: { id: removed.id, name: removed.name }, wasActive, activeId: rulesLibrary.activeId, recomputed: changed }
   }
 
   const idleProgress = () => {
@@ -2008,8 +2197,20 @@ export function apply(ctx) {
           // 15 秒缓存里还是装之前的依赖表，不清掉这一轮 refresh 会把刚装好的行写回未安装。
           invalidateInstalledCache()
           refreshInstalledOnRows()
+          // 装完之后必须核对「挂载」这一步。
+          //
+          // pluginManager.installBundle 除了写 dependencies，还会调 selectBundle
+          // 把包加进 dsh.profile.bundles —— 只写依赖不写 bundles 的插件，重启后
+          // loader 根本不会加载它，表现就是用户说的「装上了但不出现」。
+          // 这一步在官方实现里是隐式的，安静失败时前端完全看不出来，所以自己查一遍。
+          const mount = inspectMount(effectiveSpec, result)
           logger?.info?.('[market-lens] install ok spec=' + effectiveSpec + ' origin=' + String(resolved.origin) + ' ' + (Date.now() - startedAt) + 'ms')
-          logInstall('info', 'install.ok', { key: row?.key || key || null, spec: effectiveSpec, fellBackFrom, origin: resolved.origin || 'manual', ms: Date.now() - startedAt, summary: summarizeInstallResult(result) })
+          logInstall('info', 'install.ok', { key: row?.key || key || null, spec: effectiveSpec, fellBackFrom, origin: resolved.origin || 'manual', ms: Date.now() - startedAt, summary: summarizeInstallResult(result), mounted: mount.mounted, packageName: mount.packageName })
+          if (!mount.mounted) {
+            // 依赖装上了但没进 bundle 层：这不是失败（文件确实装好了、也能在
+            // 已安装清单里看到），但必须直说，否则用户会以为下次启动就能用。
+            logInstall('warn', 'install.not-mounted', { key: key || '(empty)', spec: effectiveSpec, packageName: mount.packageName, reason: mount.reason })
+          }
           return sendJson(res, 200, {
             ok: true,
             key: row?.key || key || null,
@@ -2018,6 +2219,7 @@ export function apply(ctx) {
             fellBackFrom,
             installed: installedState(),
             result: summarizeInstallResult(result),
+            mount,
           })
         } catch (cause) {
           // 有的管理器把 pendingBuilds 直接挂在错误对象上，有的只写进错误文本；
@@ -2226,21 +2428,38 @@ export function apply(ctx) {
         })
       }
 
-      // ── 评分规则 ────────────────────────────────────────────────────────────
-      if (op === 'rules.get') {
+      // ── 评分规则（规则库）───────────────────────────────────────────────────
+      // library.* 是规则库的增删选；rules.* 保留成兼容旧前端的别名，
+      // 语义全部落到「往库里加一条并启用」，不再有「覆盖当前规则文件」这回事。
+      if (op === 'library.get' || op === 'rules.get') {
+        const entry = activeEntry(rulesLibrary)
         return sendJson(res, 200, {
           ok: true,
           rules: scoringRules,
+          activeId: rulesLibrary.activeId,
+          entry: entry ? { id: entry.id, name: entry.name, description: entry.description, origin: entry.origin, builtin: Boolean(entry.builtin), savedAt: entry.savedAt } : null,
+          // describeEntry 把因子翻成人话：界面直接渲染这张表，不再让用户读 JSON
+          description: describeEntry(entry),
+          library: libraryChoices(rulesLibrary),
           document: rulesDocument(scoringRules, { includePresets: true }),
           summary: rulesSummary(),
-          savedAt: rulesSavedAt,
-          path: rulesPath,
+          paths: { library: libraryPath, legacy: rulesPath },
+          issue: rulesIssue,
         })
       }
 
       if (op === 'rules.template') {
         // 模版里自带 readme + 指标/归一化清单，用户照着改就能做出自己的规则。
-        return sendJson(res, 200, { ok: true, template: rulesTemplate(), filename: 'market-lens-scoring-rules.template.json' })
+        const template = rulesTemplate()
+        return sendJson(res, 200, {
+          ok: true,
+          template,
+          filename: 'market-lens-scoring-rules.template.json',
+          // 界面上那几张说明表要用的结构化字段（readme 只是纯文本兜底）
+          metrics: Object.entries(METRIC_REGISTRY).map(([key, item]) => ({ key, label: item.label, kind: item.kind })),
+          norms: Object.entries(NORM_REGISTRY).map(([key, item]) => ({ key, label: item.label, description: item.desc })),
+          groups: GROUP_GUIDE,
+        })
       }
 
       if (op === 'rules.export') {
@@ -2248,34 +2467,107 @@ export function apply(ctx) {
           ok: true,
           document: rulesDocument(scoringRules, { includePresets: true }),
           filename: 'market-lens-scoring-rules-' + stamp() + '.json',
+          activeId: rulesLibrary.activeId,
         })
       }
 
-      if (op === 'rules.set') {
-        const outcome = commitRules(body.rules ?? body.document ?? body, { source: body.source === 'preset' ? 'preset' : 'file', presetId: body.presetId || null })
+      // 上传：存进库里并启用。body.rules / body.document / body 都接受，
+      // name / description 可以由上传方显式指定（文件名通常就是最好的名字）。
+      if (op === 'library.add' || op === 'rules.import' || op === 'rules.set') {
+        const outcome = addUserEntry(body.rules ?? body.document ?? body, {
+          name: typeof body.name === 'string' ? body.name : null,
+          description: typeof body.description === 'string' ? body.description : null,
+          activate: body.activate !== false,
+        })
         if (!outcome.ok) return sendJson(res, 400, { ok: false, error: outcome.error, issues: outcome.issues })
-        return sendJson(res, 200, { ok: true, summary: rulesSummary(), counts: countRows(rows), rules: outcome.rules })
+        return sendJson(res, 200, {
+          ok: true,
+          summary: rulesSummary(),
+          counts: countRows(rows),
+          rules: outcome.rules,
+          library: libraryChoices(rulesLibrary),
+          activeId: outcome.activeId,
+          entry: outcome.entry,
+          renamed: outcome.renamed,
+        })
       }
 
-      if (op === 'rules.import') {
-        const outcome = commitRules(body.rules ?? body.document ?? body, { source: 'file', presetId: null })
-        if (!outcome.ok) return sendJson(res, 400, { ok: false, error: outcome.error, issues: outcome.issues })
-        return sendJson(res, 200, { ok: true, summary: rulesSummary(), counts: countRows(rows), rules: outcome.rules })
+      // 启用库里已有的某一条（下拉框 onChange 走这个）。
+      if (op === 'library.activate' || op === 'library.select') {
+        const id = String(body.id || body.activeId || '')
+        if (!id) return sendJson(res, 400, { ok: false, error: '缺少要启用的规则 id', library: libraryChoices(rulesLibrary) })
+        const outcome = activateEntry(id, { source: typeof body.source === 'string' ? body.source : null })
+        if (!outcome.ok) return sendJson(res, 404, { ok: false, error: outcome.error, library: libraryChoices(rulesLibrary) })
+        return sendJson(res, 200, {
+          ok: true,
+          summary: rulesSummary(),
+          counts: countRows(rows),
+          rules: outcome.rules,
+          library: libraryChoices(rulesLibrary),
+          activeId: outcome.activeId,
+          recomputed: outcome.recomputed,
+        })
       }
 
-      if (op === 'rules.reset') {
-        const outcome = resetRules()
-        if (!outcome.ok) return sendJson(res, 500, { ok: false, error: outcome.error, summary: rulesSummary() })
-        return sendJson(res, 200, { ok: true, summary: rulesSummary(), counts: countRows(rows), rules: scoringRules })
-      }
-
+      // 内置预设也走同一条路径：它就是库里本来就有的条目。
       if (op === 'rules.preset') {
         const presetId = String(body.id || body.presetId || '')
-        const preset = BUILT_IN_PRESETS.find((item) => item.id === presetId)
-        if (!preset) return sendJson(res, 404, { ok: false, error: '没有这个内置预设：' + presetId, presets: BUILT_IN_PRESETS.map((item) => item.id) })
-        const outcome = commitRules(preset.rules, { source: 'preset', presetId })
-        if (!outcome.ok) return sendJson(res, 400, { ok: false, error: outcome.error, issues: outcome.issues })
-        return sendJson(res, 200, { ok: true, summary: rulesSummary(), counts: countRows(rows), rules: outcome.rules })
+        const candidates = ['preset:' + presetId, presetId]
+        const found = candidates.map((id) => findEntry(rulesLibrary, id)).find(Boolean)
+        if (!found) {
+          return sendJson(res, 404, {
+            ok: false,
+            error: '没有这个内置预设：' + presetId,
+            presets: BUILT_IN_PRESETS.map((preset) => ({ id: preset.id })),
+          })
+        }
+        const outcome = activateEntry(found.id, { source: 'preset' })
+        if (!outcome.ok) return sendJson(res, 400, { ok: false, error: outcome.error })
+        return sendJson(res, 200, {
+          ok: true,
+          summary: rulesSummary(),
+          counts: countRows(rows),
+          rules: outcome.rules,
+          library: libraryChoices(rulesLibrary),
+          activeId: outcome.activeId,
+        })
+      }
+
+      // 删掉某份自定义规则。内置与预设不许删（切换走 activate 就行）。
+      if (op === 'library.remove' || op === 'rules.remove') {
+        const id = String(body.id || '')
+        if (!id) return sendJson(res, 400, { ok: false, error: '缺少要删除的规则 id', library: libraryChoices(rulesLibrary) })
+        const outcome = removeEntry(id)
+        if (!outcome.ok) {
+          const status = outcome.error.startsWith('内置规则') ? 400 : 404
+          return sendJson(res, status, { ok: false, error: outcome.error, library: libraryChoices(rulesLibrary) })
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          summary: rulesSummary(),
+          counts: countRows(rows),
+          rules: scoringRules,
+          library: libraryChoices(rulesLibrary),
+          activeId: outcome.activeId,
+          removed: outcome.removed,
+          wasActive: outcome.wasActive,
+          recomputed: outcome.recomputed,
+        })
+      }
+
+      // 兼容旧语义的「恢复内置」：不删文件，只是把 activeId 指回内置默认。
+      // 用户的规则还在库里，随时可以再选回来——这比「删掉」友好得多。
+      if (op === 'rules.reset' || op === 'library.reset') {
+        const outcome = activateEntry('builtin:default', { source: 'reset' })
+        if (!outcome.ok) return sendJson(res, 500, { ok: false, error: outcome.error, summary: rulesSummary() })
+        return sendJson(res, 200, {
+          ok: true,
+          summary: rulesSummary(),
+          counts: countRows(rows),
+          rules: scoringRules,
+          library: libraryChoices(rulesLibrary),
+          activeId: outcome.activeId,
+        })
       }
 
       return sendJson(res, 400, { ok: false, error: 'unknown op: ' + op })

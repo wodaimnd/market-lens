@@ -16,12 +16,18 @@ import {
   MarketRulesError,
   METRIC_REGISTRY,
   NORM_REGISTRY,
+  activeEntry,
+  countFactors,
+  describeEntry,
+  libraryChoices,
+  mergeLibrary,
   normalizeRules,
   prepareMetrics,
   rulesDocument,
   rulesTemplate,
   scoreGroup,
   scoreLabelFromRules,
+  serializeLibrary,
   validateRules,
 } from '../lib/rules.js'
 
@@ -423,5 +429,183 @@ describe('模版与预设', () => {
     assert.equal(roundTrip.name, '往返')
     assert.deepEqual(roundTrip.market, custom.market)
     assert.deepEqual(roundTrip.heat, custom.heat)
+  })
+})
+
+/* ------------------------------------------------------------------ 规则库 */
+
+describe('规则库：合并与选择', () => {
+  it('内置与预设永远存在且排在最前，用户条目接在后面', () => {
+    const library = mergeLibrary({
+      entries: [
+        { id: 'mine-a', name: '我的A', savedAt: '2026-11-02T00:00:00.000Z', rules: { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] } } },
+        { id: 'mine-b', name: '我的B', savedAt: '2026-11-03T00:00:00.000Z', rules: { market: { factors: [{ key: 'f', metric: 'freshness', norm: 'freshness', weight: 1 }], fallback: [] } } },
+      ],
+      activeId: 'mine-b',
+    })
+    const origins = library.entries.map((entry) => entry.origin)
+    // 前四条是内置 + 三个预设，用户条目在最后
+    assert.deepEqual(origins.slice(0, 4), ['builtin', 'preset', 'preset', 'preset'])
+    assert.deepEqual(origins.slice(4), ['user', 'user'])
+    // 用户条目按 savedAt 倒序：B 更新，排在 A 前面
+    assert.deepEqual(library.entries.slice(4).map((entry) => entry.id), ['mine-b', 'mine-a'])
+    assert.equal(library.activeId, 'mine-b')
+  })
+
+  it('activeId 指向不存在的条目时回退内置，并说明原因', () => {
+    const library = mergeLibrary({ entries: [], activeId: 'ghost' })
+    assert.equal(library.activeId, 'builtin:default')
+    assert.match(library.issues[0], /不存在/)
+  })
+
+  it('「当前选中的规则没了」要排在「某条规则坏了」前面', () => {
+    // 后者只是少一个候选项，前者直接决定界面现在按什么口径算分 —— 先说前者
+    const library = mergeLibrary({
+      activeId: 'ghost',
+      entries: [{ id: 'bad', name: '坏的', rules: { market: { factors: [{ metric: 'magic', norm: 'log', weight: 1 }] } } }],
+    })
+    assert.match(library.issues[0], /当前选中的规则/)
+    assert.match(library.issues[1], /坏的/)
+  })
+
+  it('坏条目被隔离，合法条目保留（半坏 != 全丢）', () => {
+    const library = mergeLibrary({
+      entries: [
+        { id: 'good', name: '合法', savedAt: '2026-11-02T00:00:00.000Z', rules: { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] } } },
+        { id: 'bad', name: '指标写错', rules: { market: { factors: [{ metric: 'magic', norm: 'log', weight: 1 }] } } },
+        { id: 'bad2', name: '空因子组', rules: { market: { factors: [] } } },
+      ],
+    })
+    assert.deepEqual(library.entries.filter((entry) => entry.origin === 'user').map((entry) => entry.id), ['good'])
+    assert.equal(library.issues.length, 2)
+  })
+
+  it('id 撞内置前缀的条目被丢弃：不能让上传顶掉内置预设', () => {
+    const library = mergeLibrary({
+      entries: [{ id: 'preset:newcomer', name: '伪装成预设', rules: { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] } } }],
+    })
+    assert.equal(library.entries.filter((entry) => entry.origin === 'user').length, 0)
+    assert.match(library.issues[0], /id 与内置条目冲突/)
+    // 真正的预设还在
+    assert.ok(library.entries.some((entry) => entry.id === 'preset:newcomer' && entry.origin === 'preset'))
+  })
+
+  it('同名不拦：名字只是标签', () => {
+    const rules = { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] } }
+    const library = mergeLibrary({
+      entries: [{ id: 'a', name: '同名', rules }, { id: 'b', name: '同名', rules }],
+    })
+    assert.equal(library.entries.filter((entry) => entry.name === '同名').length, 2)
+  })
+
+  it('serializeLibrary 只把用户条目落盘（内置随包发布，不重复存）', () => {
+    const library = mergeLibrary({
+      entries: [{ id: 'mine', name: '我的', savedAt: '2026-11-03T00:00:00.000Z', rules: { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] } } }],
+      activeId: 'mine',
+    })
+    const stored = serializeLibrary(library)
+    assert.equal(stored.activeId, 'mine')
+    assert.equal(stored.entries.length, 1)
+    assert.equal(stored.entries[0].id, 'mine')
+    // 内置条目不进磁盘：否则每次升级都要同步一份可能过期的副本
+    assert.ok(!stored.entries.some((entry) => entry.id.startsWith('builtin:')))
+  })
+})
+
+describe('规则库：下拉框与可读摘要', () => {
+  const library = mergeLibrary({ entries: [], activeId: 'builtin:default' })
+
+  it('libraryChoices 不带规则全文，只给下拉框需要的摘要', () => {
+    const choices = libraryChoices(library)
+    assert.ok(choices.length >= 4)
+    for (const choice of choices) {
+      assert.equal(typeof choice.id, 'string')
+      assert.equal(typeof choice.name, 'string')
+      assert.ok(['builtin', 'preset', 'user'].includes(choice.origin))
+      assert.equal(typeof choice.factorCount, 'number')
+      assert.equal(typeof choice.groups.market, 'number')
+      // 下拉框不需要 rules 全文：几十 KB 不能每帧传
+      assert.equal('rules' in choice, false)
+    }
+  })
+
+  it('describeEntry 把因子翻成「指标 + 归一化 + 权重占比」', () => {
+    const entry = library.entries.find((item) => item.id === 'builtin:default')
+    const described = describeEntry(entry, 'zh')
+    const factors = described.groups.market.factors
+    assert.equal(factors.length, 4)
+    for (const factor of factors) {
+      assert.equal(typeof factor.metricLabel, 'string')
+      assert.ok(factor.metricLabel.length > 0, '指标要有人话名字')
+      assert.equal(typeof factor.normLabel, 'string')
+      assert.equal(typeof factor.share, 'number')
+    }
+    // 权重归一化后占比合计 100
+    const total = factors.reduce((sum, factor) => sum + factor.share, 0)
+    assert.ok(total >= 99 && total <= 101, '权重占比合计应约为 100，实际 ' + total)
+    // 首项是市场评分，占 55%
+    assert.equal(factors[0].metric, 'rating')
+    assert.equal(factors[0].share, 55)
+  })
+
+  it('describeEntry 支持英文标签', () => {
+    const entry = library.entries.find((item) => item.id === 'builtin:default')
+    const described = describeEntry(entry, 'en')
+    assert.equal(described.groups.market.factors[0].metricLabel, 'Market rating')
+    assert.equal(described.groups.heat.factors[0].metricLabel, 'Installers')
+  })
+
+  it('没有因子的组要如实报 0（界面据此标「未参与」）', () => {
+    const custom = mergeLibrary({
+      activeId: 'plain',
+      entries: [{ id: 'plain', name: '只有市场分', rules: { market: { factors: [{ key: 'u', metric: 'users', norm: 'log', weight: 1 }], fallback: [] }, community: { factors: [], fallback: [] }, heat: { factors: [], fallback: [] } } }],
+    })
+    const described = describeEntry(custom.entries.find((item) => item.id === 'plain'), 'zh')
+    assert.equal(described.groups.market.factors.length, 1)
+    assert.equal(described.groups.community.factors.length, 0)
+    assert.equal(described.groups.heat.factors.length, 0)
+  })
+
+  it('when 与 fallback 也要带出来：用户才知道什么情况下换口径', () => {
+    const entry = library.entries.find((item) => item.id === 'builtin:default')
+    const described = describeEntry(entry, 'zh')
+    assert.equal(described.groups.market.when, 'rating')
+    assert.ok(described.groups.market.fallback.length > 0)
+    assert.equal(described.groups.community.when, 'stars')
+  })
+
+  it('activeEntry 在 activeId 失效时仍返回内置默认', () => {
+    const broken = { activeId: 'ghost', entries: library.entries }
+    assert.equal(activeEntry(broken).id, 'builtin:default')
+  })
+
+  it('countFactors 把 factors 与 fallback 都算进去', () => {
+    const entry = library.entries.find((item) => item.id === 'builtin:default')
+    // market 4+3 fallback、community 4、heat 3 = 14
+    assert.equal(countFactors(entry.rules), 14)
+  })
+})
+
+describe('文档包装：三种写法都能被吃下', () => {
+  const body = { name: 'X', market: { factors: [{ key: 'f', metric: 'freshness', norm: 'freshness', weight: 1 }], fallback: [] } }
+
+  it('裸规则体', () => {
+    assert.equal(validateRules(body).ok, true)
+  })
+
+  it('{format, version, rules} 的导出文件', () => {
+    assert.equal(validateRules({ format: 'market-lens/scoring-rules', version: 1, rules: body }).ok, true)
+  })
+
+  it('只有 {rules:{...}} 的手改文件（最容易漏 format 的形态）', () => {
+    const result = validateRules({ rules: body })
+    assert.equal(result.ok, true, '缺 format 的包装也必须能拆开，否则用户会觉得「导出的文件导不回去」')
+    assert.equal(result.rules.market.factors.length, 1)
+  })
+
+  it('包装里装的确实是坏的，仍然要报出真正的字段错误', () => {
+    const result = validateRules({ rules: { market: { factors: [{ metric: 'magic', norm: 'log', weight: 1 }] } } })
+    assert.equal(result.ok, false)
+    assert.match(result.issues[0], /metric/)
   })
 })

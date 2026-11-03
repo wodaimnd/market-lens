@@ -1,0 +1,671 @@
+{
+  "format": "market-lens/scoring-rules",
+  "version": 1,
+  "generatedAt": "2026-11-03T11:45:13.608Z",
+  "readme": "market-lens 评分规则模版。\n用法：把本文件的 rules 段改成你的口径，然后在「设置 → 评分规则 → 上传规则」里选它（或直接编辑本文件后上传）。\nrules.market / rules.community / rules.heat 是三组分数：market 是主排序分，community 是社区活跃分（无 stars 的行不显示），heat 是热度（排序默认键）。\n每组 = 一个 factors 数组（可选 when 开关 + fallback 备用组）。每个因子：\n  key    : 本条因子的名字，出现在「评分构成」提示里；可省略。\n  metric : 取哪个字段。可用：rating / users / stars / downloads / forks / installs / failures / freshness / pick / coverage / sources / enginesDsh。\n  norm   : 怎么把原始值映射到 0..100。可用：fixed / coverage / pick / freshness / log / quantile / linear / percent / power / raw。\n  weight : 权重，任意正数（55 与 0.55 等价，内部会归一化）；写 0 表示只看不参与。\n  params : 归一化参数。linear 用 {from,to}；power 用 {exponent}；fixed/coverage/pick 用 {high,low}（coverage 另加 min）；log/quantile 可用 {maxKey} 指定用别的指标做基准。\nwhen   : 主组只在指定 metric 非空时才用，否则走 fallback。例如 market.when = {metric:\"rating\"} 表示「有市场评分才用评分口径」。\nlabels : 分数分档阈值，必须 excellent > good > fair。\n\n归一化速查：\n  fixed      命中条件给 high，否则给 low\n  coverage   来源数 >= min 给 high，否则 low\n  pick       精选给 high，否则 low\n  freshness  按 updatedAt 距今时长分档\n  log        log1p(v)/log1p(全表最大)，抑制头部极值\n  quantile   按该指标在本次目录里的排名给分\n  linear     (v-from)/(to-from)*100 后截断\n  percent    v*100（v 已是 0..1 时）\n  power      (v/max)^exponent*100\n  raw        v 直接截断到 0..100",
+  "metrics": [
+    {
+      "key": "rating",
+      "label": "市场评分",
+      "kind": "score"
+    },
+    {
+      "key": "users",
+      "label": "安装量",
+      "kind": "count"
+    },
+    {
+      "key": "stars",
+      "label": "Star 数",
+      "kind": "count"
+    },
+    {
+      "key": "downloads",
+      "label": "下载量",
+      "kind": "count"
+    },
+    {
+      "key": "forks",
+      "label": "Fork 数",
+      "kind": "count"
+    },
+    {
+      "key": "installs",
+      "label": "安装次数",
+      "kind": "count"
+    },
+    {
+      "key": "failures",
+      "label": "失败次数",
+      "kind": "count"
+    },
+    {
+      "key": "freshness",
+      "label": "新鲜度",
+      "kind": "derived"
+    },
+    {
+      "key": "pick",
+      "label": "编辑精选",
+      "kind": "derived"
+    },
+    {
+      "key": "coverage",
+      "label": "来源覆盖",
+      "kind": "derived"
+    },
+    {
+      "key": "sources",
+      "label": "来源数量",
+      "kind": "derived"
+    },
+    {
+      "key": "enginesDsh",
+      "label": "要求的 DSH 版本",
+      "kind": "number"
+    }
+  ],
+  "norms": [
+    {
+      "key": "fixed",
+      "label": "固定分值",
+      "description": "命中条件给 high，否则给 low"
+    },
+    {
+      "key": "coverage",
+      "label": "来源覆盖分档",
+      "description": "来源数 >= min 给 high，否则 low"
+    },
+    {
+      "key": "pick",
+      "label": "精选分档",
+      "description": "精选给 high，否则 low"
+    },
+    {
+      "key": "freshness",
+      "label": "时间新鲜度分档",
+      "description": "按 updatedAt 距今时长分档"
+    },
+    {
+      "key": "log",
+      "label": "对数压缩",
+      "description": "log1p(v)/log1p(全表最大)，抑制头部极值"
+    },
+    {
+      "key": "quantile",
+      "label": "分位排序",
+      "description": "按该指标在本次目录里的排名给分"
+    },
+    {
+      "key": "linear",
+      "label": "线性区间",
+      "description": "(v-from)/(to-from)*100 后截断"
+    },
+    {
+      "key": "percent",
+      "label": "百分比",
+      "description": "v*100（v 已是 0..1 时）"
+    },
+    {
+      "key": "power",
+      "label": "幂函数",
+      "description": "(v/max)^exponent*100"
+    },
+    {
+      "key": "raw",
+      "label": "原值截断",
+      "description": "v 直接截断到 0..100"
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "默认（平衡）",
+      "description": "与内置规则一致",
+      "rules": {
+        "version": 1,
+        "name": "内置默认规则",
+        "description": "与 market-lens 0.5.0 的硬编码口径完全一致：有市场评分时按 评分/安装量/新鲜度/精选 加权，缺失时退到 安装量/新鲜度/来源覆盖。",
+        "updatedAt": null,
+        "labels": {
+          "excellent": 80,
+          "good": 60,
+          "fair": 40
+        },
+        "market": {
+          "aggregation": "weighted",
+          "when": {
+            "metric": "rating"
+          },
+          "factors": [
+            {
+              "key": "rating",
+              "metric": "rating",
+              "norm": "raw",
+              "weight": 0.55,
+              "params": null
+            },
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.25,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.1,
+              "params": null
+            },
+            {
+              "key": "pick",
+              "metric": "pick",
+              "norm": "pick",
+              "weight": 0.1,
+              "params": {
+                "high": 100,
+                "low": 60,
+                "match": true
+              }
+            }
+          ],
+          "fallback": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.6,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.25,
+              "params": null
+            },
+            {
+              "key": "coverage",
+              "metric": "coverage",
+              "norm": "coverage",
+              "weight": 0.15,
+              "params": {
+                "high": 100,
+                "low": 50,
+                "min": 2
+              }
+            }
+          ]
+        },
+        "community": {
+          "aggregation": "weighted",
+          "when": {
+            "metric": "stars"
+          },
+          "factors": [
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "log",
+              "weight": 0.55,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "log",
+              "weight": 0.2,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.15,
+              "params": null
+            },
+            {
+              "key": "forks",
+              "metric": "forks",
+              "norm": "log",
+              "weight": 0.1,
+              "params": null
+            }
+          ],
+          "fallback": []
+        },
+        "heat": {
+          "aggregation": "weighted",
+          "when": null,
+          "factors": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.45,
+              "params": null
+            },
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "log",
+              "weight": 0.35,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "log",
+              "weight": 0.2,
+              "params": null
+            }
+          ],
+          "fallback": []
+        }
+      }
+    },
+    {
+      "id": "newcomer",
+      "name": "扶持新插件",
+      "description": "降低安装量权重、提高新鲜度权重，让小体量但活跃的插件排得上来",
+      "rules": {
+        "version": 1,
+        "name": "扶持新插件",
+        "description": "与 market-lens 0.5.0 的硬编码口径完全一致：有市场评分时按 评分/安装量/新鲜度/精选 加权，缺失时退到 安装量/新鲜度/来源覆盖。",
+        "updatedAt": null,
+        "labels": {
+          "excellent": 80,
+          "good": 60,
+          "fair": 40
+        },
+        "market": {
+          "aggregation": "weighted",
+          "when": {
+            "metric": "rating"
+          },
+          "factors": [
+            {
+              "key": "rating",
+              "metric": "rating",
+              "norm": "raw",
+              "weight": 0.35,
+              "params": null
+            },
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.15,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.4,
+              "params": null
+            },
+            {
+              "key": "pick",
+              "metric": "pick",
+              "norm": "pick",
+              "weight": 0.1,
+              "params": {
+                "high": 100,
+                "low": 60,
+                "match": true
+              }
+            }
+          ],
+          "fallback": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.35,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.5,
+              "params": null
+            },
+            {
+              "key": "coverage",
+              "metric": "coverage",
+              "norm": "coverage",
+              "weight": 0.15,
+              "params": {
+                "high": 100,
+                "low": 50,
+                "min": 2
+              }
+            }
+          ]
+        },
+        "community": {
+          "aggregation": "weighted",
+          "when": {
+            "metric": "stars"
+          },
+          "factors": [
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "log",
+              "weight": 0.55,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "log",
+              "weight": 0.2,
+              "params": null
+            },
+            {
+              "key": "freshness",
+              "metric": "freshness",
+              "norm": "freshness",
+              "weight": 0.15,
+              "params": null
+            },
+            {
+              "key": "forks",
+              "metric": "forks",
+              "norm": "log",
+              "weight": 0.1,
+              "params": null
+            }
+          ],
+          "fallback": []
+        },
+        "heat": {
+          "aggregation": "weighted",
+          "when": null,
+          "factors": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.45,
+              "params": null
+            },
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "log",
+              "weight": 0.35,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "log",
+              "weight": 0.2,
+              "params": null
+            }
+          ],
+          "fallback": []
+        }
+      }
+    },
+    {
+      "id": "popularity",
+      "name": "人气优先",
+      "description": "按仓库热度排序，适合只想装最主流插件的场景",
+      "rules": {
+        "version": 1,
+        "name": "人气优先",
+        "description": "与 market-lens 0.5.0 的硬编码口径完全一致：有市场评分时按 评分/安装量/新鲜度/精选 加权，缺失时退到 安装量/新鲜度/来源覆盖。",
+        "updatedAt": null,
+        "labels": {
+          "excellent": 85,
+          "good": 65,
+          "fair": 45
+        },
+        "market": {
+          "aggregation": "weighted",
+          "when": null,
+          "factors": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "quantile",
+              "weight": 0.5,
+              "params": null
+            },
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "quantile",
+              "weight": 0.3,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "quantile",
+              "weight": 0.2,
+              "params": null
+            }
+          ],
+          "fallback": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "quantile",
+              "weight": 1,
+              "params": null
+            }
+          ]
+        },
+        "community": {
+          "aggregation": "weighted",
+          "when": {
+            "metric": "stars"
+          },
+          "factors": [
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "quantile",
+              "weight": 0.6,
+              "params": null
+            },
+            {
+              "key": "forks",
+              "metric": "forks",
+              "norm": "quantile",
+              "weight": 0.25,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "quantile",
+              "weight": 0.15,
+              "params": null
+            }
+          ],
+          "fallback": []
+        },
+        "heat": {
+          "aggregation": "weighted",
+          "when": null,
+          "factors": [
+            {
+              "key": "users",
+              "metric": "users",
+              "norm": "log",
+              "weight": 0.4,
+              "params": null
+            },
+            {
+              "key": "stars",
+              "metric": "stars",
+              "norm": "log",
+              "weight": 0.4,
+              "params": null
+            },
+            {
+              "key": "downloads",
+              "metric": "downloads",
+              "norm": "log",
+              "weight": 0.2,
+              "params": null
+            }
+          ],
+          "fallback": []
+        }
+      }
+    }
+  ],
+  "rules": {
+    "version": 1,
+    "name": "内置默认规则",
+    "description": "与 market-lens 0.5.0 的硬编码口径完全一致：有市场评分时按 评分/安装量/新鲜度/精选 加权，缺失时退到 安装量/新鲜度/来源覆盖。",
+    "updatedAt": null,
+    "labels": {
+      "excellent": 80,
+      "good": 60,
+      "fair": 40
+    },
+    "market": {
+      "aggregation": "weighted",
+      "when": {
+        "metric": "rating"
+      },
+      "factors": [
+        {
+          "key": "rating",
+          "metric": "rating",
+          "norm": "raw",
+          "weight": 0.55,
+          "params": null
+        },
+        {
+          "key": "users",
+          "metric": "users",
+          "norm": "log",
+          "weight": 0.25,
+          "params": null
+        },
+        {
+          "key": "freshness",
+          "metric": "freshness",
+          "norm": "freshness",
+          "weight": 0.1,
+          "params": null
+        },
+        {
+          "key": "pick",
+          "metric": "pick",
+          "norm": "pick",
+          "weight": 0.1,
+          "params": {
+            "high": 100,
+            "low": 60,
+            "match": true
+          }
+        }
+      ],
+      "fallback": [
+        {
+          "key": "users",
+          "metric": "users",
+          "norm": "log",
+          "weight": 0.6,
+          "params": null
+        },
+        {
+          "key": "freshness",
+          "metric": "freshness",
+          "norm": "freshness",
+          "weight": 0.25,
+          "params": null
+        },
+        {
+          "key": "coverage",
+          "metric": "coverage",
+          "norm": "coverage",
+          "weight": 0.15,
+          "params": {
+            "high": 100,
+            "low": 50,
+            "min": 2
+          }
+        }
+      ]
+    },
+    "community": {
+      "aggregation": "weighted",
+      "when": {
+        "metric": "stars"
+      },
+      "factors": [
+        {
+          "key": "stars",
+          "metric": "stars",
+          "norm": "log",
+          "weight": 0.55,
+          "params": null
+        },
+        {
+          "key": "downloads",
+          "metric": "downloads",
+          "norm": "log",
+          "weight": 0.2,
+          "params": null
+        },
+        {
+          "key": "freshness",
+          "metric": "freshness",
+          "norm": "freshness",
+          "weight": 0.15,
+          "params": null
+        },
+        {
+          "key": "forks",
+          "metric": "forks",
+          "norm": "log",
+          "weight": 0.1,
+          "params": null
+        }
+      ],
+      "fallback": []
+    },
+    "heat": {
+      "aggregation": "weighted",
+      "when": null,
+      "factors": [
+        {
+          "key": "users",
+          "metric": "users",
+          "norm": "log",
+          "weight": 0.45,
+          "params": null
+        },
+        {
+          "key": "stars",
+          "metric": "stars",
+          "norm": "log",
+          "weight": 0.35,
+          "params": null
+        },
+        {
+          "key": "downloads",
+          "metric": "downloads",
+          "norm": "log",
+          "weight": 0.2,
+          "params": null
+        }
+      ],
+      "fallback": []
+    }
+  }
+}

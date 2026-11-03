@@ -5,10 +5,12 @@
 //   1) 安装请求用 id 定位 → 只改这一行；
 //   2) 响应里带 installed.fingerprint，前端据此判断"要不要重拉目录"。
 import test from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { packageNameFromSpec } from '../index.js'
 
 function jsonResponse(body) {
   const payload = Buffer.from(JSON.stringify(body))
@@ -147,4 +149,40 @@ test('install 只影响目标行，并在响应里给出已安装指纹', async 
     if (value === undefined) delete process.env[name]
     else process.env[name] = value
   }
+})
+
+// 挂载校验：装完之后必须核对「有没有进 dsh.profile.bundles」。
+//
+// 现场问题：installBundle 除了写 dependencies 还会隐式调 selectBundle 把包
+// 加进 bundle 层；这一步安静失败时前端只看到「安装成功」，重启后插件根本不
+// 加载 —— 用户说的「装上了但不出现」就是它。所以这里既钉住解析口径，也钉住
+// 「没挂上要明确报出来」这条契约。
+describe('packageNameFromSpec：从安装目标折出包名', () => {
+  const cases = [
+    ['humanizer-ru', 'humanizer-ru'],
+    ['humanizer-ru@3.32.0', 'humanizer-ru'],
+    ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-base'],
+    ['@deepseek-ai/dsh-base@0.0.1-rc.1', '@deepseek-ai/dsh-base'],
+    ['github:o/r', 'r'],
+    ['github:o/r#path:packages/x', 'r'],
+    ['https://github.com/o/r.git', 'r'],
+    ['https://github.com/o/r/tree/main', 'r'],
+  ]
+  for (const [spec, expected] of cases) {
+    it(spec + ' → ' + expected, () => {
+      assert.equal(packageNameFromSpec(spec), expected)
+    })
+  }
+
+  it('本地路径 / link 折不出包名时返回 null（不能误报未挂载）', () => {
+    for (const spec of ['link:G:/some/pkg', 'C:/path/to/pkg', './local-dir', 'workspace:*']) {
+      assert.equal(packageNameFromSpec(spec), null, spec + ' 应返回 null')
+    }
+  })
+
+  it('空值与非法输入返回 null', () => {
+    assert.equal(packageNameFromSpec(''), null)
+    assert.equal(packageNameFromSpec(null), null)
+    assert.equal(packageNameFromSpec(undefined), null)
+  })
 })

@@ -155,7 +155,7 @@ window.__ModuleLoader__.load({
         if (!parsed || typeof parsed !== 'object') return fallback
         return {
           version: 1,
-          view: ['table', 'installed', 'custom', 'sources', 'settings'].includes(parsed.view) ? parsed.view : fallback.view,
+          view: ['table', 'installed', 'custom', 'sources', 'rules', 'logs', 'settings'].includes(parsed.view) ? parsed.view : fallback.view,
           page: Number.isFinite(parsed.page) && parsed.page >= 1 ? Math.floor(parsed.page) : fallback.page,
           pageSize: PAGE_SIZES.includes(parsed.pageSize) ? parsed.pageSize : fallback.pageSize,
           search: typeof parsed.search === 'string' ? parsed.search.slice(0, 200) : fallback.search,
@@ -494,6 +494,8 @@ window.__ModuleLoader__.load({
         installManualClipboardHint: '已复制，直接粘到官方安装框即可。',
         installNoticeClose: '关闭提示',
         installNoSpec: '这一行没有可用的安装目标，只能复制命令手动装。',
+        installNotMounted: '已装好，但没有挂载',
+        installNotMountedHint: '文件已下载、也已写进依赖，但它没被加进 profile 的 bundle 列表，重启后不会自动加载。到官方「插件」页把这个包启用一次即可；运行日志里有一条 install.not-mounted 记录。',
         requirements: '兼容性证据',
         requirementKey: '要求',
         requirementRange: '范围',
@@ -586,6 +588,93 @@ window.__ModuleLoader__.load({
         windowDetachBlocked: '桌面壳子不允许开新窗口，已改为整屏铺开；用浏览器打开 DSH 网页版时 ⧉ 就是真窗口',
         selfCheck: '自检',
         selfCheckFailed: '自检失败',
+        navLogs: '运行日志',
+        navRules: '评分规则',
+        logsTitle: '运行日志',
+        logsIntro: '安装、升级、规则切换、缓存清理都会记在这里。装不上时先看这一屏：请求目标、降级链、pnpm 原文、异常栈都在。日志只留在本次进程，重启即清空。',
+        logsEmpty: '还没有日志。装一次插件、换一次规则，这里就会出现记录。',
+        logsRefresh: '刷新',
+        logsExport: '导出日志',
+        logsCopy: '复制',
+        logsClear: '清空',
+        logsClearConfirm: '清空当前所有日志？此操作不可撤销。',
+        logsFollow: '自动跟随',
+        logsFilterLevel: '级别',
+        logsFilterTag: '标签',
+        logsFilterQuery: '搜索内容',
+        logsAllLevels: '全部级别',
+        logsCount: '条',
+        logsDropped: '早于缓冲区上限的条目已丢弃',
+        logsSeq: '序号',
+        logsTime: '时间',
+        logsLevel: '级别',
+        logsTag: '标签',
+        logsDetail: '内容',
+        logsCopied: '已复制',
+        rulesTitle: '评分规则',
+        rulesIntro: '市场风评、民间风评与热度默认按内置口径算。想换权重、加维度或改分档阈值，可以导出规则文件改完再上传；也可以上传一份写好的规则分享给别人。',
+        rulesCurrent: '当前规则',
+        rulesSourceDefault: '内置默认',
+        rulesSourceFile: '本地上传',
+        rulesSourcePreset: '内置预设',
+        rulesFactors: '因子',
+        rulesLabels: '分档阈值',
+        rulesUpload: '上传规则',
+        rulesExport: '导出规则',
+        rulesTemplate: '下载模版',
+        rulesReset: '恢复内置规则',
+        rulesResetConfirm: '恢复内置规则会删除当前的规则文件，确定？',
+        rulesPresets: '内置预设',
+        rulesApplyPreset: '应用',
+        rulesUploaded: '规则已应用，分数已重算',
+        rulesUploadFailed: '规则未应用',
+        rulesTemplateSaved: '模版已下载，照着改完再上传即可',
+        rulesIssue: '规则文件有问题，已退回内置口径',
+        rulesExplain: '规则文件是纯 JSON：三组分数（market / community / heat）各由若干因子加权得到。模版里带完整字段说明。',
+        rulesMetrics: '可用指标',
+        rulesNorms: '可用归一化',
+        rulesRulesPath: '规则文件位置',
+        rulesSelect: '选择评分规则',
+        rulesEmptyLibrary: '规则库是空的',
+        rulesLibrary: '规则库',
+        rulesLibraryHint: '内置与预设随插件发布，只能切换不能删除；自己上传的可以随时删。',
+        rulesUserCountUnit: ' 份自定义',
+        rulesFactorUnit: ' 个因子',
+        rulesNoUserEntries: '还没有自己上传的规则。点「上传规则」把改好的 JSON 加进来，它会出现在上面的下拉框里。',
+        rulesOriginBuiltin: '内置',
+        rulesOriginPreset: '内置预设',
+        rulesOriginUser: '自己上传',
+        rulesInUse: '使用中',
+        rulesSwitched: '已切换规则',
+        rulesUploaded: '规则已加入规则库并启用',
+        rulesRenamedTo: '已重命名为',
+        rulesDeleted: '已删除规则',
+        rulesBackToBuiltin: '已回到内置默认口径',
+        rulesDelete: '删除',
+        rulesDeleteYes: '确认删除',
+        rulesDeleteConfirm: '删掉这份规则？',
+        rulesCancel: '取消',
+        rulesComposition: '这条规则在算什么',
+        rulesGroupInactive: '这一组未参与评分',
+        rulesWhenNote: '仅当该指标存在时才用本组',
+        rulesFallbackNote: '否则改用',
+        rulesMetricUnit: '权重占比',
+        rulesTemplateGuide: '规则说明',
+        rulesTemplateGuideIntro: '照着下面两张表就能写出自己的规则。改完点「下载模版」拿到骨架文件，或直接在导出的规则上改。',
+        rulesTemplateDownload: '下载模版',
+        rulesFieldKey: '字段值',
+        rulesFieldMeaning: '含义',
+        rulesFieldUsedFor: '用在哪',
+        rulesMetricsHint: 'metric 可以取哪些值',
+        rulesNormsHint: 'norm 可以取哪些值',
+        rulesMetricExample: '例：{ "metric": "users", "norm": "log", "weight": 25 } 表示「按安装量、对数压缩、权重 25%」。',
+        rulesNormExample: '例：log 会把 100 和 1000 的差距压到 50 分和 100 分，避免头部插件把整张表拉满。',
+        rulesStructure: '文件结构',
+        rulesStructureSample: '{\n  "rules": {\n    "name": "我的口径",\n    "labels": { "excellent": 80, "good": 60, "fair": 40 },\n    "market": {\n      "factors": [\n        { "metric": "rating", "norm": "raw", "weight": 55 },\n        { "metric": "users",  "norm": "log", "weight": 45 }\n      ]\n    }\n  }\n}',
+        rulesGroupsGuide: '三组分数分别是什么',
+        rulesNotJson: '文件不是合法 JSON',
+        rulesLegacyPath: '旧版单文件（已迁移）',
+        logsPath: '日志只在本进程内存中，不写盘。',
       },
       en: {
         nav: 'Plugin market radar',
@@ -843,6 +932,8 @@ window.__ModuleLoader__.load({
         installManualClipboardHint: 'Copied — paste it into the official install box.',
         installNoticeClose: 'Dismiss',
         installNoSpec: 'This row has no install target; copy the command and install manually.',
+        installNotMounted: 'Installed, but not mounted',
+        installNotMountedHint: 'The files are downloaded and the dependency is saved, but the package was not added to the profile bundle list, so it will not load after a restart. Enable it once from the official Plugins page; the runtime log has an install.not-mounted entry.',
         requirements: 'Compatibility evidence',
         requirementKey: 'Requirement',
         requirementRange: 'Range',
@@ -929,6 +1020,93 @@ window.__ModuleLoader__.load({
         windowDetachBlocked: 'The desktop shell blocks new windows, so this fills the screen instead. Run the DSH web build in a browser and ⧉ opens a real window.',
         selfCheck: 'Self-check',
         selfCheckFailed: 'Self-check failed',
+        navLogs: 'Logs',
+        navRules: 'Scoring rules',
+        logsTitle: 'Runtime logs',
+        logsIntro: 'Installs, upgrades, rule switches and cache resets are recorded here. When an install fails, start from this screen: target spec, fallback chain, raw pnpm output and stack traces are all kept. Logs live in this process only and reset on restart.',
+        logsEmpty: 'No entries yet. Install a plugin or switch a rule and records will show up here.',
+        logsRefresh: 'Refresh',
+        logsExport: 'Export',
+        logsCopy: 'Copy',
+        logsClear: 'Clear',
+        logsClearConfirm: 'Clear all current logs? This cannot be undone.',
+        logsFollow: 'Follow',
+        logsFilterLevel: 'Level',
+        logsFilterTag: 'Tag',
+        logsFilterQuery: 'Search',
+        logsAllLevels: 'All levels',
+        logsCount: 'rows',
+        logsDropped: 'Older entries dropped at buffer limit',
+        logsSeq: 'Seq',
+        logsTime: 'Time',
+        logsLevel: 'Level',
+        logsTag: 'Tag',
+        logsDetail: 'Detail',
+        logsCopied: 'Copied',
+        rulesTitle: 'Scoring rules',
+        rulesIntro: 'Market score, community score and heat default to the built-in formula. To change weights, add dimensions or move label thresholds, export the rule file, edit it and upload it back — or upload someone else’s file.',
+        rulesCurrent: 'Current rules',
+        rulesSourceDefault: 'Built-in default',
+        rulesSourceFile: 'Uploaded',
+        rulesSourcePreset: 'Built-in preset',
+        rulesFactors: 'factors',
+        rulesLabels: 'Label thresholds',
+        rulesUpload: 'Upload rules',
+        rulesExport: 'Export rules',
+        rulesTemplate: 'Download template',
+        rulesReset: 'Restore built-in',
+        rulesResetConfirm: 'Restoring the built-in rules deletes the current rule file. Continue?',
+        rulesPresets: 'Built-in presets',
+        rulesApplyPreset: 'Apply',
+        rulesUploaded: 'Rules applied, scores recomputed',
+        rulesUploadFailed: 'Rules not applied',
+        rulesTemplateSaved: 'Template downloaded — edit it and upload it back',
+        rulesIssue: 'Rule file is invalid, fell back to the built-in formula',
+        rulesExplain: 'The rule file is plain JSON: three score groups (market / community / heat), each a weighted set of factors. The template documents every field.',
+        rulesMetrics: 'Metrics',
+        rulesNorms: 'Normalizers',
+        rulesRulesPath: 'Rule file location',
+        rulesSelect: 'Choose a scoring rule',
+        rulesEmptyLibrary: 'The rule library is empty',
+        rulesLibrary: 'Rule library',
+        rulesLibraryHint: 'Built-in and preset rules ship with the plugin — switch freely, they cannot be deleted. Your own uploads can be removed at any time.',
+        rulesUserCountUnit: ' custom',
+        rulesFactorUnit: ' factors',
+        rulesNoUserEntries: 'No custom rules yet. Click "Upload rules" to add your edited JSON — it will appear in the dropdown above.',
+        rulesOriginBuiltin: 'built-in',
+        rulesOriginPreset: 'preset',
+        rulesOriginUser: 'yours',
+        rulesInUse: 'in use',
+        rulesSwitched: 'Rule switched',
+        rulesUploaded: 'Rule added to the library and activated',
+        rulesRenamedTo: 'renamed to',
+        rulesDeleted: 'Rule deleted',
+        rulesBackToBuiltin: 'Back on the built-in formula',
+        rulesDelete: 'Delete',
+        rulesDeleteYes: 'Confirm delete',
+        rulesDeleteConfirm: 'Delete this rule?',
+        rulesCancel: 'Cancel',
+        rulesComposition: 'What this rule scores',
+        rulesGroupInactive: 'not used by this rule',
+        rulesWhenNote: 'this group applies only when that metric exists',
+        rulesFallbackNote: 'otherwise uses',
+        rulesMetricUnit: 'share',
+        rulesTemplateGuide: 'Rule reference',
+        rulesTemplateGuideIntro: 'The two tables below contain everything you need to write a rule. Download the template for the skeleton, or edit an exported rule.',
+        rulesTemplateDownload: 'Download template',
+        rulesFieldKey: 'Value',
+        rulesFieldMeaning: 'Meaning',
+        rulesFieldUsedFor: 'Used as',
+        rulesMetricsHint: 'accepted values for metric',
+        rulesNormsHint: 'accepted values for norm',
+        rulesMetricExample: 'e.g. { "metric": "users", "norm": "log", "weight": 25 } means "installers, log-scaled, 25% weight".',
+        rulesNormExample: 'e.g. log compresses 100 vs 1000 into 50 vs 100 points, so one huge plugin cannot flatten the whole table.',
+        rulesStructure: 'File structure',
+        rulesStructureSample: '{\n  "rules": {\n    "name": "my formula",\n    "labels": { "excellent": 80, "good": 60, "fair": 40 },\n    "market": {\n      "factors": [\n        { "metric": "rating", "norm": "raw", "weight": 55 },\n        { "metric": "users",  "norm": "log", "weight": 45 }\n      ]\n    }\n  }\n}',
+        rulesGroupsGuide: 'What the three score groups do',
+        rulesNotJson: 'file is not valid JSON',
+        rulesLegacyPath: 'Legacy single file (migrated)',
+        logsPath: 'Logs are kept in this process memory only, never written to disk.',
       },
     }
 
@@ -3986,6 +4164,612 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ---- logs page ----
+
+    const LOG_LEVELS = ['debug', 'info', 'warn', 'error']
+    const LOG_LEVEL_TONE = {
+      debug: 'var(--dsw-alias-label-secondary)',
+      info: 'var(--dsw-alias-label-primary)',
+      warn: 'var(--dsw-alias-state-warn-primary)',
+      error: 'var(--dsw-alias-state-error-primary)',
+    }
+    // 一条日志里除了通用字段以外的键，按原样列成 key=value：排查时最需要的
+    // 恰恰是 spec / detail / ms 这些具体值，而不是一句概括。
+    const LOG_META_KEYS = new Set(['seq', 'at', 'level', 'tag'])
+    const LOG_PAGE_SIZE = 120
+
+    function formatLogLine(entry) {
+      const extras = Object.entries(entry)
+        .filter(([key, value]) => !LOG_META_KEYS.has(key) && value !== null && value !== undefined)
+        .map(([key, value]) => key + '=' + (typeof value === 'string' ? value : JSON.stringify(value)))
+      const head = (entry.at || '').replace('T', ' ').slice(0, 19)
+      return head + ' [' + String(entry.level || 'info').toUpperCase() + '] ' + (entry.tag || '') + (extras.length ? '  ' + extras.join(' ') : '')
+    }
+
+    function LogsPage({ t, lang }) {
+      const [entries, setEntries] = useState([])
+      const [status, setStatus] = useState(null)
+      const [loading, setLoading] = useState(true)
+      const [error, setError] = useState(null)
+      const [level, setLevel] = useState('')
+      const [tag, setTag] = useState('')
+      const [query, setQuery] = useState('')
+      const [follow, setFollow] = useState(true)
+      const [note, setNote] = useState(null)
+      // 已拉到的最大 seq：增量拉取靠它，不然每次刷新都要重发整表。
+      const sinceRef = useRef(0)
+      const tailRef = useRef(null)
+
+      const load = useCallback(async ({ reset = false } = {}) => {
+        try {
+          const body = await request({
+            op: 'logs',
+            since: reset ? 0 : sinceRef.current,
+            limit: reset ? 500 : 200,
+            level: level || undefined,
+            tag: tag || undefined,
+            query: query || undefined,
+          })
+          const items = Array.isArray(body.entries) ? body.entries : []
+          const maxSeq = items.length ? items[items.length - 1].seq : sinceRef.current
+          if (Number.isFinite(maxSeq)) sinceRef.current = Math.max(sinceRef.current, maxSeq)
+          setStatus(body.status || null)
+          setEntries((previous) => {
+            if (reset) return items
+            const seen = new Set(previous.map((entry) => entry.seq))
+            return [...previous, ...items.filter((entry) => !seen.has(entry.seq))].slice(-500)
+          })
+          setError(null)
+        } catch (cause) {
+          setError(cause.message || String(cause))
+        } finally {
+          setLoading(false)
+        }
+      }, [level, tag, query])
+
+      useEffect(() => {
+        // 筛选条件变了就从头发一遍：增量语义只适用于同一组筛选。
+        sinceRef.current = 0
+        setLoading(true)
+        void load({ reset: true })
+      }, [level, tag, query, load])
+
+      useEffect(() => {
+        if (!follow) return undefined
+        const timer = setInterval(() => { void load() }, 4000)
+        return () => clearInterval(timer)
+      }, [follow, load])
+
+      // 跟随模式下滚到底：新日志出现在最下面，不自动滚就永远看不见。
+      useEffect(() => {
+        if (!follow || !tailRef.current) return
+        try { tailRef.current.scrollTop = tailRef.current.scrollHeight } catch { /* 非真实 DOM 就跳过 */ }
+      }, [entries.length, follow])
+
+      const exportLogs = async () => {
+        try {
+          const body = await request({ op: 'logs.export', since: 0 })
+          const blob = new Blob([String(body.text || '')], { type: 'text/plain;charset=utf-8' })
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = body.filename || ('market-lens-logs-' + new Date().toISOString().slice(0, 10) + '.txt')
+          document.body.appendChild(anchor)
+          anchor.click()
+          document.body.removeChild(anchor)
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          setNote({ tone: 'ok', text: t('logsExport') + ' ✓' })
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        }
+      }
+
+      const copyLogs = async () => {
+        const text = entries.map(formatLogLine).join('\n')
+        try {
+          if (navigator && navigator.clipboard) await navigator.clipboard.writeText(text)
+          setNote({ tone: 'ok', text: t('logsCopied') })
+        } catch {
+          // 没有剪贴板权限时退化成导出文件
+          void exportLogs()
+        }
+      }
+
+      const clearLogs = async () => {
+        if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(t('logsClearConfirm'))) return
+        try {
+          await request({ op: 'logs.clear' })
+          sinceRef.current = 0
+          setEntries([])
+          setStatus(null)
+          await load({ reset: true })
+          setNote({ tone: 'ok', text: t('logsClear') + ' ✓' })
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        }
+      }
+
+      const shown = entries.slice(-LOG_PAGE_SIZE)
+      const counts = status && status.counts ? status.counts : null
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 } },
+        h('div', null,
+          h('div', { style: { fontSize: 15, fontWeight: 650 } }, t('logsTitle')),
+          h('div', { style: { ...style.muted, fontSize: 11.5, marginTop: 2, lineHeight: 1.6 } }, t('logsIntro'))),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('select', {
+            style: { ...style.search, flex: 'none', width: 'auto', padding: '4px 7px', fontSize: 12 },
+            value: level,
+            onChange: (event) => setLevel(event.target.value),
+          }, h('option', { value: '' }, t('logsAllLevels')), LOG_LEVELS.map((value) => h('option', { key: value, value }, value))),
+          h('input', {
+            style: { ...style.search, flex: '0 0 150px' },
+            value: tag,
+            placeholder: t('logsFilterTag'),
+            onChange: (event) => setTag(event.target.value),
+          }),
+          h('input', {
+            style: { ...style.search, flex: '1 1 200px' },
+            value: query,
+            placeholder: t('logsFilterQuery'),
+            onChange: (event) => setQuery(event.target.value),
+          }),
+          h('button', { type: 'button', style: buttonStyle(follow, false, true), onClick: () => setFollow((value) => !value), title: t('logsFollow') }, t('logsFollow') + (follow ? ' ✓' : '')),
+          h('button', { type: 'button', style: buttonStyle(false, loading, true), disabled: loading, onClick: () => void load({ reset: true }) }, t('logsRefresh')),
+          h('button', { type: 'button', style: buttonStyle(false, !entries.length, true), disabled: !entries.length, onClick: () => void copyLogs() }, t('logsCopy')),
+          h('button', { type: 'button', style: buttonStyle(false, !entries.length, true), disabled: !entries.length, onClick: () => void exportLogs() }, t('logsExport')),
+          h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => void clearLogs() }, t('logsClear'))),
+        counts
+          ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+              h('span', { style: style.chip }, 'total · ' + formatNumber(counts.total || 0)),
+              LOG_LEVELS.map((value) => (counts[value]
+                ? h('span', { key: value, style: { ...style.chip, color: LOG_LEVEL_TONE[value] } }, value + ' · ' + formatNumber(counts[value]))
+                : null)),
+              status && status.dropped ? h('span', { style: style.chip, title: t('logsDropped') }, 'dropped · ' + formatNumber(status.dropped)) : null)
+          : null,
+        error ? h('div', { style: style.errorBox }, error) : null,
+        note
+          ? h('div', { style: { fontSize: 11.5, color: note.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } }, note.text)
+          : null,
+        h('div', {
+          // 日志区自己滚，不把整页顶长：几百条一起铺开就没法看别的了。
+          ref: tailRef,
+          style: {
+            border: '1px solid var(--dsw-alias-border-l1)',
+            borderRadius: 8,
+            background: 'var(--dsw-alias-bg-layer-1)',
+            fontFamily: MONO,
+            fontSize: 11.5,
+            lineHeight: 1.65,
+            padding: '8px 10px',
+            maxHeight: '58vh',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          },
+        },
+          shown.length === 0
+            ? h('div', { style: { ...style.muted, padding: '18px 4px' } }, loading ? '…' : t('logsEmpty'))
+            : shown.map((entry) => h('div', { key: entry.seq, style: { color: LOG_LEVEL_TONE[entry.level] || 'var(--dsw-alias-label-primary)' } }, formatLogLine(entry)))),
+      )
+    }
+
+    // ---- rules page ----
+
+    const RULE_PRESET_LABEL = (preset, lang) => (preset && preset.name ? (typeof preset.name === 'string' ? preset.name : (preset.name[lang] || preset.name.zh || preset.name.en)) : '')
+    const RULE_LOCALIZED = (value, lang) => {
+      if (typeof value === 'string') return value
+      if (value && typeof value === 'object') return value[lang] || value.zh || value.en || ''
+      return ''
+    }
+    // 来源标签：内置 / 预设 / 自己传的。下拉框里要一眼看出哪些能删。
+    const RULE_ORIGIN_LABEL = (origin, t) => (
+      origin === 'builtin' ? t('rulesOriginBuiltin')
+        : origin === 'preset' ? t('rulesOriginPreset')
+          : origin === 'user' ? t('rulesOriginUser')
+            : origin || '—'
+    )
+    const RULE_ORIGIN_COLOR = (origin) => (
+      origin === 'builtin' ? 'var(--dsw-alias-brand-primary)'
+        : origin === 'preset' ? 'var(--dsw-alias-state-success-primary)'
+          : 'var(--dsw-alias-label-secondary)'
+    )
+    const GROUP_LABELS = {
+      market: { zh: '市场风评', en: 'Market score' },
+      community: { zh: '民间风评', en: 'Community score' },
+      heat: { zh: '热度', en: 'Heat' },
+    }
+    const GROUP_HINT = {
+      market: { zh: '表格里「市场风评」列用的就是它，也是主排序参考。', en: 'Drives the Market column and the primary ranking.' },
+      community: { zh: '社区活跃度；没有 Star 数的条目这一列显示「无数据」。', en: 'Community traction; rows without stars show no data.' },
+      heat: { zh: '默认排序键；某个指标缺值时权重会自动在剩余指标间重新分配。', en: 'Default sort key; missing metrics redistribute weight.' },
+    }
+    const METRIC_HINTS = {
+      rating: { zh: '市场方给的原评分（0–100）', en: 'Rating supplied by the marketplace' },
+      users: { zh: '安装人数', en: 'Number of installers' },
+      stars: { zh: '仓库 Star 数', en: 'Repository stars' },
+      downloads: { zh: '周下载量', en: 'Weekly downloads' },
+      forks: { zh: 'Fork 数', en: 'Forks' },
+      installs: { zh: '累计安装次数', en: 'Total installs' },
+      failures: { zh: '安装失败次数', en: 'Failed installs' },
+      freshness: { zh: '最后更新时间距现在的远近', en: 'How recently the plugin was updated' },
+      pick: { zh: '是否被市场标为精选', en: 'Whether the marketplace features it' },
+      coverage: { zh: '被几个来源同时收录', en: 'How many sources list it' },
+      sources: { zh: '收录来源的数量', en: 'Number of listing sources' },
+      enginesDsh: { zh: '声明要求的最低 DSH 版本', en: 'Declared minimum DSH version' },
+    }
+    const NORM_HINTS = {
+      fixed: { zh: '命中就给高分，不命中给低分', en: 'High score when matched, low otherwise' },
+      coverage: { zh: '来源数达到门槛给高分，否则给低分', en: 'High when source count reaches the threshold' },
+      pick: { zh: '精选给高分，否则给低分', en: 'High when featured' },
+      freshness: { zh: '按 7 / 30 / 90 / 180 / 365 天分档', en: 'Buckets at 7 / 30 / 90 / 180 / 365 days' },
+      log: { zh: '对数压缩：抑制头部极值，小数值也能拉开差距', en: 'Log scale: tames outliers' },
+      quantile: { zh: '按本次目录内的排名给分', en: 'Rank within the current catalog' },
+      linear: { zh: '线性映射：小于 from 记 0，大于 to 记 100', en: 'Linear map from a floor to a ceiling' },
+      percent: { zh: '百分比：原值除以满分再乘 100', en: 'Value as a percentage of a maximum' },
+      power: { zh: '幂函数：指数越大，越偏向头部', en: 'Power curve: higher exponents favour leaders' },
+      raw: { zh: '原值直接截断到 0–100', en: 'Raw value clamped to 0–100' },
+    }
+
+    /**
+     * 把一条规则渲染成「人能读」的卡片：每组分数一栏，因子一行一个，
+     * 显示 指标 → 归一化方式 → 权重占比。用户不需要看 JSON 就懂它在算什么。
+     */
+    function RuleDigest({ description, lang, t }) {
+      if (!description || !description.groups) return null
+      const contributions = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+        ['market', 'community', 'heat'].map((name) => {
+          const group = description.groups[name]
+          const label = RULE_LOCALIZED(GROUP_LABELS[name], lang)
+          const hint = RULE_LOCALIZED(GROUP_HINT[name], lang)
+          const factors = group.factors || []
+          return h('div', { key: name, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' } },
+              h('span', { style: { fontSize: 12.5, fontWeight: 600 } }, label),
+              h('span', { style: { ...style.muted, fontSize: 11 } }, hint),
+              // 这一组根本没参与打分时要说清楚，否则用户以为配了没用
+              factors.length === 0 ? h('span', { style: { ...style.chip, color: 'var(--dsw-alias-state-warn-primary)' } }, t('rulesGroupInactive')) : null),
+            factors.length === 0
+              ? null
+              : h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                  factors.map((factor) => h('span', {
+                    key: factor.key,
+                    style: { ...style.chip, fontFamily: MONO, fontSize: 11 },
+                    title: RULE_LOCALIZED(METRIC_HINTS[factor.metric], lang) + ' · ' + RULE_LOCALIZED(NORM_HINTS[factor.norm], lang),
+                  },
+                    RULE_LOCALIZED({ zh: factor.metricLabel, en: factor.metricLabel }, lang) || factor.metric,
+                    h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, ' · ' + (RULE_LOCALIZED(NORM_HINTS[factor.norm], lang) || factor.norm)),
+                    h('span', { style: { color: 'var(--dsw-alias-brand-primary)' } }, ' · ' + String(factor.share) + '%')))),
+            group.when
+              ? h('div', { style: { ...style.muted, fontSize: 10.5 } }, t('rulesWhenNote') + '：' + (RULE_LOCALIZED(METRIC_HINTS[group.when], lang) || group.when))
+              : null,
+            group.fallback && group.fallback.length
+              ? h('div', { style: { ...style.muted, fontSize: 10.5 } },
+                  t('rulesFallbackNote') + '：' + group.fallback.map((factor) => (RULE_LOCALIZED(METRIC_HINTS[factor.metric], lang) || factor.metric)).join(' · '))
+              : null)
+        }))
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('span', { style: { fontSize: 12.5, fontWeight: 600 } }, t('rulesComposition')),
+          h('span', { style: style.chip }, t('rulesLabels') + ' · ' + description.labels.excellent + ' / ' + description.labels.good + ' / ' + description.labels.fair)),
+        contributions)
+    }
+
+    /** 模版说明表：指标一张、归一化一张。用户照着这两张表就能写规则。 */
+    function TemplateGuide({ guide, lang, t }) {
+      if (!guide) return null
+      const tableStyle = { width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }
+      const cell = { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'top', textAlign: 'left' }
+      const headCell = { ...cell, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', borderBottom: '1px solid var(--dsw-alias-border-l2)' }
+      const codeCell = { ...cell, fontFamily: MONO, color: 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap' }
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } },
+        h('div', null,
+          h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 4 } }, t('rulesMetrics') + ' — ' + t('rulesMetricsHint')),
+          h('table', { style: tableStyle },
+            h('thead', null, h('tr', null,
+              h('th', { style: headCell }, t('rulesFieldKey')),
+              h('th', { style: headCell }, t('rulesFieldMeaning')),
+              h('th', { style: headCell }, t('rulesFieldUsedFor')))),
+            h('tbody', null,
+              (guide.metrics || []).map((item) => h('tr', { key: item.key },
+                h('td', { style: codeCell }, item.key),
+                h('td', { style: cell }, RULE_LOCALIZED(METRIC_HINTS[item.key], lang) || RULE_LOCALIZED(item.label, lang) || ''),
+                h('td', { style: { ...cell, ...style.muted } }, RULE_LOCALIZED(item.label, lang) || ''))))),
+          h('div', { style: { ...style.muted, fontSize: 10.5, marginTop: 4 } }, t('rulesMetricExample'))),
+        h('div', null,
+          h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 4 } }, t('rulesNorms') + ' — ' + t('rulesNormsHint')),
+          h('table', { style: tableStyle },
+            h('thead', null, h('tr', null,
+              h('th', { style: headCell }, t('rulesFieldKey')),
+              h('th', { style: headCell }, t('rulesFieldMeaning')),
+              h('th', { style: headCell }, t('rulesFieldUsedFor')))),
+            h('tbody', null,
+              (guide.norms || []).map((item) => h('tr', { key: item.key },
+                h('td', { style: codeCell }, item.key),
+                h('td', { style: cell }, RULE_LOCALIZED(NORM_HINTS[item.key], lang) || RULE_LOCALIZED(item.description, lang) || ''),
+                h('td', { style: { ...cell, ...style.muted } }, RULE_LOCALIZED(item.label, lang) || ''))))),
+          h('div', { style: { ...style.muted, fontSize: 10.5, marginTop: 4 } }, t('rulesNormExample'))),
+        h('div', null,
+          h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 4 } }, t('rulesStructure')),
+          h('div', { style: { ...style.muted, fontSize: 11.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', fontFamily: MONO, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 7, padding: '8px 10px' } },
+            t('rulesStructureSample'))),
+        h('div', null,
+          h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 4 } }, t('rulesGroupsGuide')),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            (guide.groups || []).map((group) => h('div', { key: group.key, style: { display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' } },
+              h('span', { style: { ...style.chip, fontFamily: MONO } }, group.key),
+              h('span', { style: { fontSize: 11.5, fontWeight: 600 } }, RULE_LOCALIZED(group.label, lang)),
+              h('span', { style: { ...style.muted, fontSize: 11 } }, RULE_LOCALIZED(group.desc, lang))))))
+      )
+    }
+
+    function RulesPage({ status, t, lang, onStatus }) {
+      const [detail, setDetail] = useState(null)
+      const [loading, setLoading] = useState(true)
+      const [busy, setBusy] = useState(false)
+      const [note, setNote] = useState(null)
+      const [guide, setGuide] = useState(null)
+      const [showGuide, setShowGuide] = useState(false)
+      const [pendingDelete, setPendingDelete] = useState(null)
+      const fileRef = useRef(null)
+
+      const summary = status?.rules || null
+      // 下拉框的候选只从 rules.get 拿（status 里的 choices 是同一份，先渲染它避免闪烁）
+      const choices = (detail && Array.isArray(detail.library)) ? detail.library : ((summary && Array.isArray(summary.choices)) ? summary.choices : [])
+      const activeId = (detail && detail.activeId) || (summary && summary.activeId) || ''
+      const activeChoice = choices.find((item) => item.id === activeId) || null
+
+      const loadDetail = useCallback(async () => {
+        try {
+          const body = await request({ op: 'rules.get' })
+          setDetail(body)
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        } finally {
+          setLoading(false)
+        }
+      }, [])
+
+      useEffect(() => { void loadDetail() }, [loadDetail])
+
+      // 模版说明是静态内容，只在用户第一次展开时拉一次。
+      const loadGuide = useCallback(async () => {
+        if (guide) return
+        try {
+          const body = await request({ op: 'rules.template' })
+          setGuide({ metrics: body.metrics || [], norms: body.norms || [], groups: body.groups || [], template: body.template || null })
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        }
+      }, [guide])
+
+      // 换规则后 Host 会重算全表分数；这里顺手把规则详情与状态都刷一遍。
+      const afterChange = async (body, okText) => {
+        setNote({ tone: 'ok', text: okText })
+        await loadDetail()
+        if (typeof onStatus === 'function') await onStatus()
+      }
+
+      /** 下拉框选项变化：直接启用库里的那一条，不动库本身。 */
+      const selectRule = async (id) => {
+        if (!id || id === activeId) return
+        setBusy(true)
+        try {
+          const body = await request({ op: 'library.activate', id })
+          const choice = choices.find((item) => item.id === id)
+          await afterChange(body, t('rulesSwitched') + ' · ' + (choice ? choice.name : id))
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+          // 失败要把下拉框拨回真实值，否则界面会停在用户以为切过去了的那一项
+          await loadDetail()
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const applyDocument = async (document, name) => {
+        setBusy(true)
+        try {
+          const body = await request({ op: 'library.add', document, name })
+          await afterChange(body, t('rulesUploaded') + (body.renamed ? ' · ' + t('rulesRenamedTo') + ' ' + (body.entry ? body.entry.name : '') : ''))
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const deleteRule = async (id) => {
+        setBusy(true)
+        try {
+          const body = await request({ op: 'library.remove', id })
+          await afterChange(body, t('rulesDeleted') + ' · ' + (body.removed ? body.removed.name : id) + (body.wasActive ? ' · ' + t('rulesBackToBuiltin') : ''))
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        } finally {
+          setBusy(false)
+          setPendingDelete(null)
+        }
+      }
+
+      const resetRules = async () => {
+        setBusy(true)
+        try {
+          const body = await request({ op: 'rules.reset' })
+          await afterChange(body, t('rulesBackToBuiltin'))
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const exportRules = async () => {
+        try {
+          const body = await request({ op: 'rules.export' })
+          const blob = new Blob([JSON.stringify(body.document, null, 2)], { type: 'application/json;charset=utf-8' })
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = body.filename || ('market-lens-scoring-rules-' + new Date().toISOString().slice(0, 10) + '.json')
+          document.body.appendChild(anchor)
+          anchor.click()
+          document.body.removeChild(anchor)
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          setNote({ tone: 'ok', text: t('rulesExport') + ' ✓' })
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        }
+      }
+
+      const downloadTemplate = async () => {
+        try {
+          const body = await request({ op: 'rules.template' })
+          setGuide({ metrics: body.metrics || [], norms: body.norms || [], groups: body.groups || [], template: body.template || null })
+          const blob = new Blob([JSON.stringify(body.template, null, 2)], { type: 'application/json;charset=utf-8' })
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = body.filename || 'market-lens-scoring-rules.template.json'
+          document.body.appendChild(anchor)
+          anchor.click()
+          document.body.removeChild(anchor)
+          setTimeout(() => URL.revokeObjectURL(url), 2000)
+          setNote({ tone: 'ok', text: t('rulesTemplateSaved') })
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        }
+      }
+
+      const uploadRules = async (file) => {
+        if (!file) return
+        setBusy(true)
+        try {
+          const text = await file.text()
+          let parsed
+          try {
+            parsed = JSON.parse(text)
+          } catch {
+            throw new Error(t('rulesUploadFailed') + '：' + t('rulesNotJson'))
+          }
+          // 文件名（去掉扩展名）默认作为规则名：用户上传时不用再手填
+          const baseName = typeof file.name === 'string' ? file.name.replace(/\.json$/i, '') : ''
+          await applyDocument(parsed, baseName)
+        } catch (cause) {
+          setNote({ tone: 'error', text: (cause.message || String(cause)) })
+        } finally {
+          setBusy(false)
+          if (fileRef.current) fileRef.current.value = ''
+        }
+      }
+
+      const issues = (detail && detail.issue) || (summary && summary.issue) || null
+      const userEntries = choices.filter((item) => item.origin === 'user')
+      const description = (detail && detail.description) || null
+      const card = { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }
+
+      // 用户规则列表单独建树：这部分原来嵌在 return 里，三处三元 + map 回调
+      // 叠在一起，括号数稍一错位就整页编译不过，很难看出是哪一层的问题。
+      const userRows = userEntries.map((item) => {
+        const confirming = pendingDelete === item.id
+        return h('div', {
+          key: item.id,
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', padding: '5px 0', borderTop: '1px solid var(--dsw-alias-border-l1)' },
+        },
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
+            h('span', { style: { fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+              item.name,
+              item.id === activeId ? h('span', { style: { ...style.chip, color: 'var(--dsw-alias-brand-primary)' } }, t('rulesInUse')) : null,
+              h('span', { style: { ...style.muted, fontSize: 10.5 } }, String(item.factorCount) + t('rulesFactorUnit'))),
+            item.description ? h('span', { style: { ...style.muted, fontSize: 11 } }, item.description) : null),
+          confirming
+            ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+                h('span', { style: { ...style.muted, fontSize: 11 } }, t('rulesDeleteConfirm')),
+                h('button', { type: 'button', style: buttonStyle(false, busy, true), disabled: busy, onClick: () => void deleteRule(item.id) }, t('rulesDeleteYes')),
+                h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => setPendingDelete(null) }, t('rulesCancel')))
+            : h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => setPendingDelete(item.id) }, t('rulesDelete')))
+      })
+
+      const libraryList = userEntries.length === 0
+        ? h('div', { style: { ...style.muted, fontSize: 11.5 } }, t('rulesNoUserEntries'))
+        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, ...userRows)
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 920 } },
+        h('div', null,
+          h('div', { style: { fontSize: 15, fontWeight: 650 } }, t('rulesTitle')),
+          h('div', { style: { ...style.muted, fontSize: 11.5, marginTop: 2, lineHeight: 1.6 } }, t('rulesIntro'))),
+
+        h('div', null,
+          h('div', { style: { fontSize: 13, fontWeight: 600 } }, t('rulesSelect')),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 } },
+            h('select', {
+              // 下拉框是这次改动的核心：所有可选口径（内置 + 预设 + 自己传的）都在这里
+              className: 'ml-rule-select',
+              style: { ...style.search, flex: '1 1 260px', maxWidth: 420, padding: '5px 8px', fontSize: 12.5 },
+              value: activeId,
+              disabled: busy || loading || choices.length === 0,
+              onChange: (event) => void selectRule(event.target.value),
+            }, choices.length === 0
+              ? h('option', { value: '' }, loading ? '…' : t('rulesEmptyLibrary'))
+              : choices.map((item) => h('option', { key: item.id, value: item.id },
+                  // 选项文字自带来源与因子数，用户不用逐条点开就知道选的是哪一类
+                  item.name + ' · ' + RULE_ORIGIN_LABEL(item.origin, t) + ' · ' + String(item.factorCount) + t('rulesFactorUnit')))),
+            activeChoice
+              ? h('span', { style: { ...style.chip, color: RULE_ORIGIN_COLOR(activeChoice.origin) } }, RULE_ORIGIN_LABEL(activeChoice.origin, t))
+              : null),
+          activeChoice && activeChoice.description
+            ? h('div', { style: { ...style.muted, fontSize: 11.5, marginTop: 2 } }, activeChoice.description)
+            : null),
+
+        issues ? h('div', { style: style.errorBox }, t('rulesIssue') + '：' + issues) : null,
+        note
+          ? h('div', { style: { fontSize: 11.5, color: note.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } }, note.text)
+          : null,
+
+        // 当前规则在算什么：不读 JSON 也能懂
+        description ? h('div', { style: card }, h(RuleDigest, { description, lang, t })) : null,
+
+        h('div', { style: card },
+          h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' } },
+            h('div', { style: { fontSize: 13, fontWeight: 600 } },
+              t('rulesLibrary') + (userEntries.length ? ' · ' + String(userEntries.length) + t('rulesUserCountUnit') : '')),
+            h('span', { style: { ...style.muted, fontSize: 11 } }, t('rulesLibraryHint'))),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            h('button', { type: 'button', style: buttonStyle(true, busy, true), disabled: busy, onClick: () => fileRef.current && fileRef.current.click() }, t('rulesUpload')),
+            h('button', { type: 'button', style: buttonStyle(showGuide, false, true), onClick: () => { setShowGuide((value) => !value); if (!showGuide) void loadGuide() } }, t('rulesTemplateGuide') + (showGuide ? ' ✓' : '')),
+            h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => void downloadTemplate() }, t('rulesTemplateDownload')),
+            h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => void exportRules() }, t('rulesExport')),
+            h('button', { type: 'button', style: buttonStyle(false, busy || Boolean(summary && summary.isDefault), true), disabled: busy || Boolean(summary && summary.isDefault), onClick: () => void resetRules() }, t('rulesReset')),
+            h('input', {
+              ref: fileRef,
+              type: 'file',
+              accept: 'application/json,.json',
+              style: { display: 'none' },
+              onChange: (event) => {
+                const file = event.target.files && event.target.files[0]
+                void uploadRules(file)
+              },
+            })),
+          // 自己传的规则列表：可以删（内置与预设只在下拉框里出现，不给删除入口）
+          libraryList),
+
+        showGuide
+          ? h('div', { style: card },
+              h('div', { style: { fontSize: 13, fontWeight: 600 } }, t('rulesTemplateGuide')),
+              h('div', { style: { ...style.muted, fontSize: 11.5, lineHeight: 1.6 } }, t('rulesTemplateGuideIntro')),
+              guide
+                ? h(TemplateGuide, { guide, lang, t })
+                : h('div', { style: { ...style.muted, fontSize: 11.5 } }, '…'))
+          : null,
+
+        h('div', { style: { ...style.muted, fontSize: 11, lineHeight: 1.6 } },
+          t('rulesRulesPath') + '：' + ((detail && detail.paths && detail.paths.library) || '—'),
+          detail && detail.paths && detail.paths.legacy && !(detail.summary && detail.summary.migratedFrom)
+            ? h('div', null, t('rulesLegacyPath') + '：' + detail.paths.legacy)
+            : null),
+      )
+    }
+
     // ---- onboarding ----
 
     function Onboarding({ status, t, onSync }) {
@@ -4456,16 +5240,29 @@ window.__ModuleLoader__.load({
               : candidate
           )))
           if (body && body.installed) installedStamp.current = body.installed.fingerprint || null
+          // 装上了但没挂载是最坑的一种「成功」：文件在、已安装清单也看得到，
+          // 但重启后 loader 根本不加载它。必须当场说清楚，不能报成绿字。
+          const mount = body && body.mount ? body.mount : null
+          const mountWarn = Boolean(mount && mount.checked && !mount.mounted)
           showNotice({
-            tone: 'success',
-            title: upgradeTo ? t('upgradeSucceeded') : t('installSucceeded'),
+            tone: mountWarn ? 'warn' : 'success',
+            title: mountWarn ? t('installNotMounted') : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded')),
             subtitle: row.pkg || row.title || row.name || null,
             detail: upgradeTo ? upgradeTo : null,
             spec: (body && body.spec) || null,
-            hint: body && body.fellBackFrom ? t('installFallback') : null,
+            hint: mountWarn
+              ? t('installNotMountedHint')
+              : (body && body.fellBackFrom ? t('installFallback') : null),
             retry: false,
             row: null,
           })
+
+          // 目标插件本身没挂载：重启后也不会出现，所以直接落一条日志，方便回看
+          if (mountWarn) {
+            try {
+              void request({ op: 'logs', limit: 5 }).catch(() => {})
+            } catch { /* 日志是尽力而为 */ }
+          }
           await Promise.all([loadStatus().catch(() => {}), loadCatalog().catch(() => {})])
         } catch (cause) {
           // 构建脚本待批准：记下来，下次同一行自动带上 approvedBuilds 重试。
@@ -4845,6 +5642,8 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: style.tab(view === 'installed'), onClick: () => setView('installed') }, t('navInstalled')),
             h('button', { type: 'button', style: style.tab(view === 'custom'), onClick: () => setView('custom') }, t('navCustom')),
             h('button', { type: 'button', style: style.tab(view === 'sources'), onClick: () => setView('sources') }, t('navSources')),
+            h('button', { type: 'button', style: style.tab(view === 'rules'), onClick: () => setView('rules') }, t('navRules')),
+            h('button', { type: 'button', style: style.tab(view === 'logs'), onClick: () => setView('logs') }, t('navLogs')),
             h('button', { type: 'button', style: style.tab(view === 'settings'), onClick: () => setView('settings') }, t('navSettings')),
           ),
           error
@@ -4890,7 +5689,11 @@ window.__ModuleLoader__.load({
                 })
               : view === 'custom'
                 ? h(CustomInstallPage, { t, lang, onInstalled: loadStatus })
-                : view === 'settings'
+                : view === 'rules'
+                  ? h(RulesPage, { status, t, lang, onStatus: loadStatus })
+                  : view === 'logs'
+                    ? h(LogsPage, { t, lang })
+                    : view === 'settings'
                   ? h(SettingsPage, {
                       status,
                       t,

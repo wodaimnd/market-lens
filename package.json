@@ -1,9 +1,9 @@
 {
   "name": "@local/market-lens",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
-  "description": "DSH plugin market radar: aggregates 1024Store, dshfind, dsh.so, dshmarketplace and custom catalogs, checks DSH runtime compatibility from npm metadata, and offers Excel-like filtering in real desktop-style windows, resizable columns, scheduled refresh, installed-plugin update checks that never probe local/link installs, per-sync change badges, a security-first view and importable/exportable source config.",
+  "description": "DSH plugin market radar: aggregates 1024Store, dshfind, dsh.so, dshmarketplace and custom catalogs, checks DSH runtime compatibility from npm metadata, and offers Excel-like filtering in real desktop-style windows, resizable columns, scheduled refresh, installed-plugin update checks that never probe local/link installs, per-sync change badges, a security-first view, persistent page state, a runtime operation log for install troubleshooting, importable/exportable source config, and a scoring-rule library with dropdown selection and a documented template.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -23,8 +23,10 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test tests/",
-    "selfcheck": "node scripts/selfcheck.mjs"
+    "test": "node --test --test-force-exit \"tests/*.test.js\"",
+    "selfcheck": "node scripts/selfcheck.mjs",
+    "smoke": "node scripts/smoke-rules.mjs",
+    "smoke:library": "node scripts/smoke-library.mjs"
   },
   "dependencies": {
     "semver": "7.7.3"
