@@ -1,0 +1,4 @@
+# @local/market-lens — Host row; the sidebar entry and panel live in the Client half.
+- insert:
+    - id: market-lens
+      name: '@local/market-lens'

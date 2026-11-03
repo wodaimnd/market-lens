@@ -1,0 +1,373 @@
+{
+  "evaluatedAt": "2026-11-01",
+  "rubric": {
+    "market": [
+      {
+        "key": "official",
+        "weight": 30,
+        "zh": "官方/内置集成与合作伙伴身份"
+      },
+      {
+        "key": "scale",
+        "weight": 20,
+        "zh": "目录规模与 npm 可安装条目覆盖"
+      },
+      {
+        "key": "freshness",
+        "weight": 20,
+        "zh": "更新频率、数据新鲜度与可用性"
+      },
+      {
+        "key": "fields",
+        "weight": 20,
+        "zh": "用户数、评分、版本、更新日期等字段完整度"
+      },
+      {
+        "key": "curation",
+        "weight": 10,
+        "zh": "收录校验、风险标记与编辑运营"
+      }
+    ],
+    "community": [
+      {
+        "key": "stars",
+        "weight": 30,
+        "zh": "GitHub Star / Fork 与项目能见度"
+      },
+      {
+        "key": "recommend",
+        "weight": 30,
+        "zh": "dshbase、dshpacks 等独立站点的推荐"
+      },
+      {
+        "key": "health",
+        "weight": 20,
+        "zh": "最近推送、未关闭 issue 与维护活跃度"
+      },
+      {
+        "key": "sentiment",
+        "weight": 20,
+        "zh": "社区讨论中的口碑与争议"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "key": "1024store",
+      "name": "DSH 1024Store",
+      "short": "1024Store",
+      "role": "目录源 · 用户数与安装热度",
+      "homepage": "https://deepseek1024.com",
+      "endpoint": "https://deepseek1024.com/api/v2/plugins",
+      "partnership": true,
+      "defaultEnabled": true,
+      "marketScore": 92,
+      "communityScore": 78,
+      "marketEvidence": [
+        "DSH Community Market 的内置合作来源（built-in provider，adapter market.dsh-1024store-v2），无需写代码即可在官方市场启用。",
+        "2026-11-01 实测：目录 13,924 条，70 页分页；其中 4,987 个不同 npm 包、11,538 个 GitHub 仓库。",
+        "提供 installerCount / installCount / installs7d / installs30d 等安装统计，是三个来源里唯一能稳定给出“用户数”口径的。",
+        "开源目录流水线：静态校验 package.json、dsh.bundle.patch 与 patch 文件存在性；PR 收录 + GitHub topic 自动发现。"
+      ],
+      "communityEvidence": [
+        "awesome-deepseek-harness-plugins 在 dshbase 被标为“已验证 · 实测可装 / 推荐”，页面显示 291 Stars、275 Forks、69 个未关闭 issue。",
+        "社区文章把它列为插件淘金潮中少数提供搜索、安装排行榜与免费公开 API 的目录之一。",
+        "1024Store 自带 `dsh1024` 安装包装器，只有通过它安装才会计入安装统计；直接 `dsh plugin add` 不计入，因此用户数是“下限样本”，不是全量用户。"
+      ],
+      "caveats": [
+        "2026-11-01 请求返回的 source 字段为 `stale`，目录生成时间与真实 GitHub 状态可能有延迟。",
+        "目录 13,924 条中存在大量同仓库/同包重复项；本插件按 npm 包名与仓库身份去重后才展示。",
+        "没有评分字段（0/13,924 条带 rating/score），评分列对该来源显示“无数据”。",
+        "安装失败计数（failureCount）口径不透明，本插件只把它放在详情里作参考，不参与风评计算。"
+      ],
+      "fields": {
+        "users": true,
+        "rating": false,
+        "version": false,
+        "updated": true,
+        "compatibility": "via-npm",
+        "stars": true,
+        "downloads": "partial"
+      },
+      "links": [
+        {
+          "label": "官网 / API",
+          "url": "https://deepseek1024.com"
+        },
+        {
+          "label": "目录仓库",
+          "url": "https://github.com/imsai-sh/awesome-deepseek-harness-plugins"
+        },
+        {
+          "label": "dshbase 实测页",
+          "url": "https://dshbase.com/zh/plugins/awesome-deepseek-harness-plugins/"
+        }
+      ],
+      "numbers": {
+        "entries": 13924,
+        "npmPackages": 4987,
+        "repositories": 11538,
+        "withUsers": 13924,
+        "withRating": 0,
+        "withStars": 13919,
+        "withDownloads7d": 4431
+      }
+    },
+    {
+      "key": "dshfind",
+      "name": "dshfind",
+      "short": "dshfind",
+      "role": "目录源 · 评分与编辑推荐",
+      "homepage": "https://dshfind.com",
+      "endpoint": "https://api.dshfind.com/market/dsh-index.json",
+      "partnership": true,
+      "defaultEnabled": true,
+      "marketScore": 88,
+      "communityScore": 82,
+      "marketEvidence": [
+        "DSH Community Market 的内置合作来源（built-in provider，adapter market.dshfind-v1）；另提供 format 1 的 dsh-index.json 给自定义插件索引使用。",
+        "2026-11-01 实测：索引 6,222 个插件，全部是 npm 包且仓库回链校验通过；每日刷新，附编辑推荐（featured）与 0–100 评分。",
+        "评分覆盖 167 个插件（约 2.8%），不是全量评分；本插件只展示来源确实给出的分数，其余显示“无数据”。",
+        "索引自带 GitHub stars（6,222/6,222）和最新发布版本/发布时间，字段干净、结构稳定，适合做兼容性与更新日期判断。"
+      ],
+      "communityEvidence": [
+        "dshbase 实测页标为“已验证 · 实测可装 / 推荐”，显示 306 Stars、21 Forks、39 个未关闭 issue，最近推送 2026-10-13。",
+        "dshfind 是学习社区 + 插件超市一体站点，提供编辑推荐、作者排行与公开 API 文档，社区口碑偏正面。",
+        "dshpacks 的独立页面显示 190 Stars、最近推送 2026-09-21，并标注“needs adapt”，说明第三方站点对其适配状态有分歧，需保留审视。"
+      ],
+      "caveats": [
+        "没有用户数/安装数；用户数列对仅出现在 dshfind 的插件显示“无数据”。",
+        "评分只覆盖 167 个插件，且是 dshfind 自有运营评分，不是用户星级；本插件将其标为“dshfind 评分”。",
+        "索引不提供 DSH peerDependencies / engines，需要再查 npm 才能判断兼容性。"
+      ],
+      "fields": {
+        "users": false,
+        "rating": true,
+        "version": true,
+        "updated": true,
+        "compatibility": "via-npm",
+        "stars": true,
+        "downloads": false
+      },
+      "links": [
+        {
+          "label": "官网",
+          "url": "https://dshfind.com"
+        },
+        {
+          "label": "索引 JSON",
+          "url": "https://api.dshfind.com/market/dsh-index.json"
+        },
+        {
+          "label": "dshbase 实测页",
+          "url": "https://dshbase.com/zh/plugins/dshfind/"
+        },
+        {
+          "label": "dshpacks 页面",
+          "url": "https://www.dshpacks.com/plugins/hikariming-dshfind/"
+        }
+      ],
+      "numbers": {
+        "entries": 6222,
+        "withRating": 167,
+        "withStars": 6222,
+        "featured": 29,
+        "latestPublish": "2026-10-29"
+      }
+    },
+    {
+      "key": "dshso",
+      "name": "dsh.so 市场",
+      "short": "dsh.so",
+      "role": "精选市场 · 安装验证 + 安全审计",
+      "homepage": "https://www.dsh.so",
+      "endpoint": "https://cdn.dsh.so/market/index.json",
+      "partnership": false,
+      "defaultEnabled": true,
+      "marketScore": 90,
+      "communityScore": 86,
+      "marketEvidence": [
+        "dsh.so 是独立社区项目，提供 24,185 个插件的目录、安装验证阶梯（L1–L5）与安全审计；数据接口页面明确支持 DSH format 1 索引源。",
+        "2026-11-01 实测：精选市场索引 format 1，10,366 个条目全部来自“当前 dsh 版本安装验证通过 + 低风险安全结论”的组合包；critical / medium / 未审计条目被排除。",
+        "索引提供 stars、编辑/榜单标签、版本与 engines.dsh、分类；CDN 每小时缓存，公开、免密钥、CORS 全开。",
+        "另有全量索引 27,631 条与安装/安全单插件 JSON；本插件默认只接精选市场，避免把未验证条目混入首屏。"
+      ],
+      "communityEvidence": [
+        "dsh.so 的数据接口、安装验证、安全审计和榜单在社区中被多处引用；24,185 个插件的规模位于生态前列。",
+        "精选索引的低风险/安装验证过滤，与 dshbase、dshmarketplace 的实测推荐形成交叉验证。",
+        "独立项目，不隶属于 DeepSeek；榜单与安全结论是站点自有运营判断，不是官方评级。"
+      ],
+      "caveats": [
+        "精选市场只有 10,366 条，覆盖小于全量索引；用户数和评分仍显示“无数据”。",
+        "format 1 没有用户数/安装数；安全结论、安装验证等级只作为展示与筛选参考。",
+        "榜单标签与编辑推荐由 dsh.so 运营，不等于本插件背书。"
+      ],
+      "fields": {
+        "users": false,
+        "rating": false,
+        "version": true,
+        "updated": true,
+        "compatibility": "via-npm-or-engines",
+        "stars": true,
+        "downloads": false,
+        "security": true,
+        "verification": true
+      },
+      "links": [
+        {
+          "label": "dsh.so",
+          "url": "https://www.dsh.so"
+        },
+        {
+          "label": "数据接口",
+          "url": "https://www.dsh.so/zh/data/"
+        },
+        {
+          "label": "精选索引 JSON",
+          "url": "https://cdn.dsh.so/market/index.json"
+        }
+      ],
+      "numbers": {
+        "entries": 10366,
+        "fullIndex": 27631,
+        "minVerification": "L4",
+        "riskFilter": "low"
+      }
+    },
+    {
+      "key": "dshmarketplace",
+      "name": "dshmarketplace.dev",
+      "short": "dshmarketplace",
+      "role": "REST API · 安装验证 + 风险标记",
+      "homepage": "https://dshmarketplace.dev",
+      "endpoint": "https://dshmarketplace.dev/api/v1/plugins",
+      "partnership": false,
+      "defaultEnabled": false,
+      "marketScore": 84,
+      "communityScore": 80,
+      "marketEvidence": [
+        "公开 REST API：2026-11-01 实测 total=15,545，page/limit 分页；字段含 npmPackage、install、installCheck、installCheckDsh、riskFlags、summaryZh、license、stars、pushedAt。",
+        "安装验证状态（passed / failed / unknown）与风险标记（如 terminal surface、requires credentials）直接可筛选，适合在安装前做风险提示。",
+        "同时被 Python 包 dshmarketplace 与 dshmarketplace-cli 读取，数据口径相对稳定。"
+      ],
+      "communityEvidence": [
+        "dshmarketplace.dev 在 DSH 社区被多个客户端/教程引用，提供网页、npm CLI 与 Python 库三种入口。",
+        "条目带摘要、许可证和 GitHub 活跃度，适合与 1024Store/dshfind/dsh.so 交叉校验。",
+        "没有官方合作身份；收录与验证结论是站点自有运营。"
+      ],
+      "caveats": [
+        "没有用户数/评分；安装验证不等同于安全审计。",
+        "API limit 实际上限约 96 条/页，首次全量同步约 162 页。",
+        "riskFlags 是站点判断，本插件只展示原始标记。"
+      ],
+      "fields": {
+        "users": false,
+        "rating": false,
+        "version": false,
+        "updated": true,
+        "compatibility": "via-npm",
+        "stars": true,
+        "downloads": false,
+        "security": false,
+        "verification": true
+      },
+      "links": [
+        {
+          "label": "官网",
+          "url": "https://dshmarketplace.dev"
+        },
+        {
+          "label": "公开 API",
+          "url": "https://dshmarketplace.dev/api/v1/plugins"
+        },
+        {
+          "label": "Python 客户端",
+          "url": "https://pypi.org/project/dshmarketplace/"
+        }
+      ],
+      "numbers": {
+        "entries": 15545,
+        "pageSize": 96,
+        "installChecks": true,
+        "riskFlags": true
+      }
+    },
+    {
+      "key": "npm",
+      "name": "npm registry",
+      "short": "npm",
+      "role": "元数据源 · 版本与兼容性",
+      "homepage": "https://registry.npmjs.org",
+      "endpoint": "https://registry.npmjs.org/{package}/latest",
+      "partnership": false,
+      "defaultEnabled": true,
+      "marketScore": 95,
+      "communityScore": 60,
+      "marketEvidence": [
+        "DSH 官方插件管理器安装 registry 包时的版本与 peer 兼容性权威来源；本插件用同一套 engines.dsh / @deepseek-ai/dsh-* peer 规则判断。",
+        "提供 latest 版本、engines、peerDependencies，是“适配 DSH 应用版本”唯一可靠的机器可读依据。",
+        "覆盖全部 7,955 个去重后的 npm 包；GitHub-only 条目没有 npm 包，会显示“无 npm 包”。"
+      ],
+      "communityEvidence": [
+        "npm 是公共基础设施，不存在“社区口碑”意义上的运营方；本项只给基础分。",
+        "注册表没有用户数、评分、收录审核或 DSH 兼容性徽章，不能单独作为市场源使用。"
+      ],
+      "caveats": [
+        "只作为元数据与兼容性来源，不作为插件发现列表。",
+        "latest 可能领先于目录快照；版本与更新日期会以 npm latest 为准，并在详情里同时展示目录版本。"
+      ],
+      "fields": {
+        "users": false,
+        "rating": false,
+        "version": true,
+        "updated": true,
+        "compatibility": true,
+        "stars": false,
+        "downloads": false
+      },
+      "links": [
+        {
+          "label": "npm registry",
+          "url": "https://registry.npmjs.org"
+        }
+      ],
+      "numbers": {
+        "uniquePackages": 7955
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "name": "dshbase.com",
+      "marketScore": 82,
+      "communityScore": 84,
+      "reason": "20,020 个插件、7,843 个已验证，字段含信任等级/协议/更新时间；但目录是 HTML 分页（201 页×100），没有发现稳定公开的 JSON API，接入需要脆弱抓取，暂不内置。",
+      "url": "https://dshbase.com/zh/plugins/directory/"
+    },
+    {
+      "name": "dsh.so 全量索引",
+      "marketScore": 86,
+      "communityScore": 86,
+      "reason": "27,631 条全量索引（含 24,814 条 audited/low、1,196 medium、360 high、19 critical），字段比精选市场更全；默认不接入是为了避免把未验证/高风险条目混入首屏，用户仍可通过自定义 format 1 源接入精选市场。",
+      "url": "https://cdn.dsh.so/plugins-index.json"
+    },
+    {
+      "name": "dshmarketplace 之外的客户端",
+      "marketScore": 60,
+      "communityScore": 85,
+      "reason": "dshmarket 等客户端本身是插件市场 UI，不是可复用目录源；其数据仍来自上游目录。",
+      "url": "https://www.npmjs.com/package/dshmarket"
+    },
+    {
+      "name": "GitHub topic / awesome list",
+      "marketScore": 55,
+      "communityScore": 80,
+      "reason": "它们是上游发现机制，不带用户数/评分/安装验证；本插件通过 1024Store、dshfind、dsh.so 等已标准化源间接覆盖。",
+      "url": "https://github.com/topics/dsh-plugin"
+    }
+  ],
+  "method": {
+    "zh": "市场风评按官方/内置集成、目录规模、新鲜度、字段完整度、收录校验五项加权；民间风评按 GitHub 能见度、独立站点推荐、维护健康度、社区讨论四项加权。dsh.so 与 dshmarketplace 是独立社区市场，不是官方合作方；分数是编辑判断（0–100），不是任何官方评级。",
+    "en": "Market reputation weights official/built-in integration, catalog scale, freshness, field coverage and curation; community reputation weights GitHub visibility, independent recommendations, maintenance health and discussion sentiment. Scores are editorial (0–100), not an official rating."
+  }
+}

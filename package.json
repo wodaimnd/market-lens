@@ -1,0 +1,56 @@
+{
+  "name": "@local/market-lens",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH plugin market radar: aggregates 1024Store, dshfind, dsh.so, dshmarketplace and custom catalogs, checks DSH runtime compatibility from npm metadata, and offers Excel-like filtering in real desktop-style windows, resizable columns, scheduled refresh, installed-plugin update checks that never probe local/link installs, per-sync change badges, a security-first view and importable/exportable source config.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "sources.json",
+    "lib/**",
+    "scripts/**",
+    "docs/**",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/",
+    "selfcheck": "node scripts/selfcheck.mjs"
+  },
+  "dependencies": {
+    "semver": "7.7.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wodaimnd/market-lens.git"
+  },
+  "homepage": "https://github.com/wodaimnd/market-lens#readme",
+  "bugs": {
+    "url": "https://github.com/wodaimnd/market-lens/issues"
+  },
+  "license": "MIT",
+  "author": "wodaimnd <woyi2333@gmail.com>",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "dsh-plugin"
+  ]
+}
