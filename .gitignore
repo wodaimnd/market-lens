@@ -14,6 +14,11 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*
 
+# Local test / scratch artifacts (never publish these)
+test-out.txt
+tmp-*
+*-out.txt
+
 # Environment / local configuration
 .env
 .env.*
