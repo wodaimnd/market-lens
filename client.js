@@ -511,6 +511,8 @@ window.__ModuleLoader__.load({
         heat: '热度',
         scoreBreakdown: '风评构成',
         noDescription: '来源没有提供描述。',
+        expandText: '展开全文',
+        collapseText: '收起',
         clearFilter: '清除此筛选',
         value: '取值',
         count: '数量',
@@ -949,6 +951,8 @@ window.__ModuleLoader__.load({
         heat: 'Heat',
         scoreBreakdown: 'Score breakdown',
         noDescription: 'The source did not provide a description.',
+        expandText: 'Show more',
+        collapseText: 'Show less',
         clearFilter: 'Clear this filter',
         value: 'Value',
         count: 'Count',
@@ -1472,9 +1476,28 @@ window.__ModuleLoader__.load({
       '.ml-row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
       '.ml-btn:hover:not(:disabled), .ml-filter-btn:hover, .ml-head-btn:hover { color: var(--dsw-alias-label-primary) !important; }',
       '.ml-btn:focus-visible, .ml-filter-btn:focus-visible, .ml-head-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }',
+      // 滚动条统一在这里定义，而不是散落到各个组件的内联样式：
+      // 之前只有表格横向滚动有自定义滚动条，日志区、规则页、弹层都是系统默认的
+      // 粗条（在 Windows 上是 17px 灰块），既难看又压缩可视区域。
+      // 用 .ml-scroll 这个类挂到任何可能溢出的容器上即可。
+      '.ml-scroll { overflow: auto; overscroll-behavior: contain; }',
+      '.ml-scroll::-webkit-scrollbar { width: 10px; height: 10px; }',
+      '.ml-scroll::-webkit-scrollbar-track { background: transparent; }',
+      '.ml-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-border-l2); border-radius: 999px; }',
+      '.ml-scroll::-webkit-scrollbar-thumb:hover { background: var(--dsw-alias-label-secondary); }',
+      '.ml-scroll::-webkit-scrollbar-corner { background: transparent; }',
+      // Firefox / 非 webkit 内核：标准属性同样生效
+      '.ml-scroll { scrollbar-width: thin; scrollbar-color: var(--dsw-alias-border-l2) transparent; }',
+      // 表格自己原有的横向滚动条规则保留（它 class 不同名，行为一致）
       '.ml-table-scroll::-webkit-scrollbar { height: 10px; }',
       '.ml-table-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-border-l2); border-radius: 999px; }',
       '.ml-resizer:hover, .ml-resizer:active { background: var(--dsw-alias-brand-primary); opacity: 0.55; }',
+      // 折叠文本：默认只显示 N 行，超出部分淡出，点「展开」看全文。
+      // 用 max-height + 渐变遮罩而不是 -webkit-line-clamp，是因为后者在
+      // 长串无空格文本（URL、包名）上会算出错误的高度。
+      '.ml-clamp { position: relative; overflow: hidden; }',
+      '.ml-clamp::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.6em; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--dsw-alias-bg-base)); }',
+      '.ml-clamp-full::after { display: none; }',
     ].join('\n')
 
     const buttonStyle = (primary, disabled, small) => ({
@@ -1497,7 +1520,6 @@ window.__ModuleLoader__.load({
         boxSizing: 'border-box',
         height: '100%',
         minHeight: 0,
-        overflowY: 'auto',
         padding: '24px 28px 36px',
         background: 'var(--dsw-alias-bg-base)',
         color: 'var(--dsw-alias-label-primary)',
@@ -1819,14 +1841,78 @@ window.__ModuleLoader__.load({
           notice.subtitle ? h('span', { style: { ...style.muted, fontWeight: 400 } }, notice.subtitle) : null,
         ),
         notice.detail ? h('pre', {
+          className: 'ml-scroll',
           style: {
-            margin: '4px 0 0', padding: '6px 8px', maxHeight: 150, overflow: 'auto', borderRadius: 6,
+            margin: '4px 0 0', padding: '6px 8px', maxHeight: 150, borderRadius: 6,
             background: 'rgba(0,0,0,0.22)', fontFamily: MONO, fontSize: 11, lineHeight: 1.45,
             whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
           },
         }, notice.detail) : null,
         notice.hint ? h('div', { style: { ...style.muted, marginTop: 4 } }, notice.hint) : null,
         buttons,
+      )
+    }
+
+    /**
+     * 可折叠的长文本。
+     *
+     * 要求的行为是「默认缩放」：先只露几行，超出了才给「展开」；
+     * 没有超出的短文本不该长出一个没用的按钮（那会让每一行都显得拥挤）。
+     *
+     * 判断「有没有超出」必须在真实 DOM 上量，不能靠字符数猜：中英文混排、
+     * URL 这种无空格长串、以及不同字号下，字符数和行数根本不是线性关系。
+     * 所以这里先渲染成收起状态，再用 scrollHeight / clientHeight 对比。
+     *
+     * @param {{text: string, lines?: number, t: any, style?: object, mono?: boolean}} props
+     */
+    function ClampText({ text, lines = 3, t, style: extraStyle, mono }) {
+      const [expanded, setExpanded] = useState(false)
+      const [overflowing, setOverflowing] = useState(false)
+      const ref = useRef(null)
+      const raw = typeof text === 'string' ? text : String(text ?? '')
+      const lineHeight = mono ? 1.55 : 1.65
+      const collapsedHeight = Math.round(lines * 12.8 * lineHeight)
+
+      useEffect(() => {
+        const node = ref.current
+        if (!node || typeof node.scrollHeight !== 'number') return
+        // 收起状态下的可视高度是 collapsedHeight；内容更高就说明需要按钮。
+        // 留 2px 余量：亚像素行高会把「刚好 N 行」算成超出。
+        setOverflowing(node.scrollHeight > collapsedHeight + 2)
+      }, [raw, collapsedHeight])
+
+      if (!raw) return null
+
+      const body = h('div', {
+        ref,
+        className: 'ml-clamp' + (expanded ? ' ml-clamp-full' : ''),
+        style: {
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
+          fontFamily: mono ? MONO : 'inherit',
+          fontSize: mono ? 11.5 : 12.8,
+          lineHeight: lineHeight,
+          color: 'var(--dsw-alias-label-secondary)',
+          ...(!expanded ? { maxHeight: collapsedHeight } : {}),
+          ...(extraStyle || {}),
+        },
+      }, raw)
+
+      if (!overflowing && !expanded) return body
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+        body,
+        h('button', {
+          type: 'button',
+          onClick: () => setExpanded((value) => !value),
+          style: {
+            appearance: 'none', border: 'none', background: 'transparent',
+            color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer',
+            font: 'inherit', fontSize: 11.5, padding: 0, alignSelf: 'flex-start',
+          },
+          title: expanded ? (t ? t('collapseText') : '收起') : (t ? t('expandText') : '展开全文'),
+        }, expanded ? (t ? t('collapseText') : '收起 ↑') : ((t ? t('expandText') : '展开全文') + ' ↓')),
       )
     }
 
@@ -2387,7 +2473,7 @@ window.__ModuleLoader__.load({
         ),
         collapsed ? null : h(
           'div',
-          { style: { flex: '1 1 auto', minHeight: 0, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 9 } },
+          { className: 'ml-scroll', style: { flex: '1 1 auto', minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 9 } },
           children,
         ),
         // 壳子拒绝开新窗口时的解释条：只在 ⧉ 失败后出现几秒。
@@ -2505,7 +2591,7 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   'div',
-                  { style: { display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 260, overflowY: 'auto' } },
+                  { className: 'ml-scroll', style: { display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 260 } },
                   options
                     .filter((option) => !search || option.label.toLowerCase().includes(search.toLowerCase()) || option.value.toLowerCase().includes(search.toLowerCase()))
                     .map((option) =>
@@ -3375,7 +3461,7 @@ window.__ModuleLoader__.load({
                   row.featured ? h(Badge, { color: 'var(--dsw-alias-state-warn-primary)' }, t('featured')) : null,
                   row.installed ? h(Badge, { color: 'var(--dsw-alias-state-success-primary)' }, t('yes')) : null,
                 ),
-                h('p', { style: { margin: '12px 0 0', fontSize: 12.8, lineHeight: 1.65, color: 'var(--dsw-alias-label-secondary)' } }, row.desc || t('noDescription')),
+                h(ClampText, { text: row.desc || t('noDescription'), lines: 4, t }),
                 h('div', { style: style.section },
                   h('h3', { style: style.sectionTitle }, t('detail')),
                   h('div', { style: style.kv },
@@ -4334,6 +4420,7 @@ window.__ModuleLoader__.load({
         h('div', {
           // 日志区自己滚，不把整页顶长：几百条一起铺开就没法看别的了。
           ref: tailRef,
+          className: 'ml-scroll',
           style: {
             border: '1px solid var(--dsw-alias-border-l1)',
             borderRadius: 8,
@@ -4343,7 +4430,6 @@ window.__ModuleLoader__.load({
             lineHeight: 1.65,
             padding: '8px 10px',
             maxHeight: '58vh',
-            overflow: 'auto',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           },
@@ -5584,7 +5670,7 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { style: style.page },
+        { className: 'ml-scroll', style: style.page },
         h('style', { key: 'market-lens-css' }, STYLE_TAG),
         h(
           'div',

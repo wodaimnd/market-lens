@@ -48,7 +48,7 @@ import {
   readJson,
   writeJsonAtomic,
 } from './lib/runtime.js'
-import { fetchJson, pickText } from './lib/util.js'
+import { fetchJson, pickText, sleep } from './lib/util.js'
 import { OpLog } from './lib/op-log.js'
 import {
   BUILT_IN_PRESETS,
@@ -146,6 +146,43 @@ const message = (error) => {
   return code + text
 }
 
+/**
+ * 这个失败是不是「文件被占用」。
+ *
+ * Windows 上 pnpm 替换 node_modules 里的包时要先 rename 到 _tmp_*，
+ * 而 DSH 正在加载那个包（宿主进程持有它的文件句柄），rename 就会被拒：
+ *
+ *   [ERR_PNPM_EPERM] [importPackage ...\node_modules\@tt-a1i\archify-dsh]
+ *   EPERM: operation not permitted, rename '..._tmp_16340_11' -> '...archify-dsh'
+ *
+ * 这类失败有三个特征，和「版本不存在」完全不同：
+ *   1. 不是目标的问题，换个 spec 一样失败 —— 所以绝不能走降级；
+ *   2. 锁是瞬时的，宿主放弃句柄后重试就能过；
+ *   3. 用户能做的是关掉 DSH 再装，或者等一会儿重试。
+ *
+ * Linux/macOS 上对应的错误是 EBUSY / ETXTBSY，一并认。
+ * 导出是为了让测试直接钉住这套判定 —— 判错一次就会拿错误的目标去重装。
+ */
+export function isFileBusy(error) {
+  const text = message(error)
+  if (/ERR_PNPM_EPERM|EPERM|EBUSY|ETXTBSY|resource busy|being used by another process/i.test(text)) return true
+  // pnpm 的 importPackage 阶段报 rename 失败，一定是占用（不是权限问题：
+  // 真没权限时连 _tmp_ 都写不出来，错误会出现在更早的步骤）
+  return /rename.*_tmp_.*->/i.test(text)
+}
+
+/** 从 pnpm 报错里挖出被占用的包名，用来给用户一句能行动的提示。 */
+export function busyPackageFrom(error) {
+  const text = message(error)
+  const imported = /\[importPackage ([^\]]+)\]/i.exec(text)
+  if (imported) return imported[1].trim()
+  const renamed = /rename ['"]?([^'"]*_tmp_[^'"]*)['"]?\s*->\s*['"]?([^'"]+)['"]?/i.exec(text)
+  if (renamed) {
+    // _tmp_ 那段形如 ...\archify-dsh_tmp_16340_11，取目标路径更准
+    return renamed[2].trim()
+  }
+  return null
+}
 // 实际收到的 manifestVersion 可能是数字、缺失或对象：统一转成可读文本再拼进错误信息
 const versionText = (value) => (typeof value === 'string' ? value : JSON.stringify(value ?? null))
 
@@ -705,6 +742,43 @@ export function apply(ctx) {
         listener(payload)
       } catch {
         // 监听者出错不影响换规则本身
+      }
+    }
+  }
+
+  /**
+   * 带重试的 installBundle。
+   *
+   * 只对「文件占用」重试：这是唯一一类「等一会儿自己会好」的失败。
+   * 三次退避 1s / 3s / 6s —— 宿主放弃句柄通常在几百毫秒到几秒内；
+   * 等太久用户以为卡死，等太短又白试。
+   *
+   * 其它失败一律立刻抛：版本不存在、包名非法这些重试一万次也一样。
+   */
+  async function runInstallWithRetry(manager, spec, options, meta = {}) {
+    const delays = [1000, 3000, 6000]
+    let attempt = 0
+    while (true) {
+      try {
+        return await manager.installBundle(spec, options)
+      } catch (cause) {
+        const busy = isFileBusy(cause)
+        if (!busy || attempt >= delays.length) throw cause
+        const wait = delays[attempt]
+        attempt += 1
+        const busyPkg = busyPackageFrom(cause)
+        opLog.write('warn', 'install.file-busy', {
+          op: 'install',
+          key: meta.key || null,
+          spec,
+          origin: meta.origin || null,
+          attempt,
+          waitMs: wait,
+          busyPackage: busyPkg,
+          detail: message(cause).slice(0, 400),
+        })
+        logger?.info?.('[market-lens] install retry ' + attempt + '/' + delays.length + ' in ' + wait + 'ms: file busy' + (busyPkg ? ' (' + busyPkg + ')' : ''))
+        await sleep(wait)
       }
     }
   }
@@ -2168,9 +2242,12 @@ export function apply(ctx) {
           if (approvedBuilds.length) options.approvedBuilds = approvedBuilds
           let result
           try {
-            result = await manager.installBundle(effectiveSpec, options)
+            result = await runInstallWithRetry(manager, effectiveSpec, options, { key: key || '(empty)', origin: resolved.origin })
           } catch (cause) {
             const firstDetail = message(cause)
+            // 文件占用不是「目录版本过期」，降级目标等于换个东西装，毫无帮助。
+            // 必须先把 EPERM 排除在降级判断之外，否则会拿一个坏目标掩盖真实原因。
+            if (isFileBusy(cause)) throw cause
             const fallback = fallbackInstallSpec(effectiveSpec, firstDetail)
             logInstall('warn', 'install.attempt-failed', { key: key || '(empty)', spec: effectiveSpec, origin: resolved.origin, approved: approvedBuilds.length, fallback: fallback || null, detail: firstDetail })
             if (!fallback) throw cause
@@ -2178,7 +2255,7 @@ export function apply(ctx) {
             fellBackFrom = effectiveSpec
             effectiveSpec = fallback
             logInstall('warn', 'install.fallback', { key: key || '(empty)', spec: effectiveSpec, fellBackFrom, origin: resolved.origin, detail: firstDetail })
-            result = await manager.installBundle(effectiveSpec, options)
+            result = await runInstallWithRetry(manager, effectiveSpec, options, { key: key || '(empty)', origin: resolved.origin })
           }
           const pendingBuilds = Array.isArray(result?.pendingBuilds)
             ? result.pendingBuilds.filter((name) => typeof name === 'string' && name)
@@ -2241,17 +2318,44 @@ export function apply(ctx) {
           // 降级过的话 effectiveSpec 已经不带 #path: 了，所以用第一次尝试的目标判断。
           const attemptedSpec = fellBackFrom || effectiveSpec
           const subdirMissing = attemptedSpec.includes('#path:') && /ERR_PNPM_INVALID_PATH|not a valid sub-directory/i.test(detail)
+          // 文件占用重试三次仍失败：这不是代码问题，是宿主进程还握着那个目录。
+          // 必须把「关掉 DSH 再装」这句话给出去，否则用户只会反复点安装。
+          const fileBusy = isFileBusy(cause)
+          const busyPackage = fileBusy ? busyPackageFrom(cause) : null
+          const code = fileBusy ? 'file-busy' : (subdirMissing ? 'subdir-missing' : null)
           logger?.info?.('[market-lens] install failed key=' + (key || '(empty)') + ' origin=' + String(resolved.origin) + ' spec=' + effectiveSpec + ' error=' + detail)
-          logInstall('error', 'install.failed', { key: key || '(empty)', spec: effectiveSpec, attemptedSpec, fellBackFrom, origin: resolved.origin, ms: Date.now() - startedAt, code: subdirMissing ? 'subdir-missing' : null, detail, stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null })
+          logInstall('error', 'install.failed', {
+            key: key || '(empty)',
+            spec: effectiveSpec,
+            attemptedSpec,
+            fellBackFrom,
+            origin: resolved.origin,
+            ms: Date.now() - startedAt,
+            code,
+            busyPackage,
+            retried: fileBusy ? 3 : 0,
+            detail,
+            stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null,
+          })
           return sendJson(res, 500, {
             ok: false,
             spec: effectiveSpec,
             fellBackFrom,
             origin: resolved.origin,
-            code: subdirMissing ? 'subdir-missing' : undefined,
-            error: subdirMissing
-              ? detail + '\n源数据里的子目录在当前仓库中不存在（可能已改名或删除）；请刷新目录，或打开仓库确认路径后复制命令安装。'
-              : detail,
+            code: code || undefined,
+            busyPackage,
+            error: fileBusy
+              ? '文件被占用，已自动重试 3 次仍失败。\n'
+                + (busyPackage ? '被占用的包：' + busyPackage + '\n' : '')
+                + '这是 Windows 上正在运行的 DSH 仍持有 node_modules 里的文件句柄导致的，不是网络或版本问题。\n'
+                + '处理办法（任选其一）：\n'
+                + '  1. 关掉 DSH Desktop 后在命令行执行：pnpm --dir "' + profileDir + '" add ' + effectiveSpec + '\n'
+                + '  2. 或者卸载/禁用清单里那个插件后重试本插件\n'
+                + '  3. 或者稍后重试（宿主放弃句柄后通常几秒内即可）\n'
+                + '\n原始错误：' + detail
+              : (subdirMissing
+                ? detail + '\n源数据里的子目录在当前仓库中不存在（可能已改名或删除）；请刷新目录，或打开仓库确认路径后复制命令安装。'
+                : detail),
           })
         } finally {
           installingKey = null
@@ -2301,7 +2405,7 @@ export function apply(ctx) {
         try {
           const options = { enabled: true, saveExact: true }
           if (approvedBuilds.length) options.approvedBuilds = approvedBuilds
-          const result = await manager.installBundle(spec, options)
+          const result = await runInstallWithRetry(manager, spec, options, { key: pkg, origin: 'upgrade' })
           const pendingBuilds = Array.isArray(result?.pendingBuilds)
             ? result.pendingBuilds.filter((name) => typeof name === 'string' && name)
             : []
@@ -2352,9 +2456,26 @@ export function apply(ctx) {
             })
           }
           const detail = message(cause)
+          // 升级同样会因为宿主占着旧版本目录而 EPERM：这不是版本问题，必须说清楚。
+          const fileBusy = isFileBusy(cause)
+          const busyPackage = fileBusy ? busyPackageFrom(cause) : null
           logger?.info?.('[market-lens] upgrade failed spec=' + spec + ' error=' + detail)
-          upgradeLog('error', 'upgrade.failed', { version, spec, ms: Date.now() - startedAt, detail, stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null })
-          return sendJson(res, 500, { ok: false, pkg, version, spec, error: detail })
+          upgradeLog('error', 'upgrade.failed', { version, spec, ms: Date.now() - startedAt, code: fileBusy ? 'file-busy' : null, busyPackage, retried: fileBusy ? 3 : 0, detail, stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null })
+          return sendJson(res, 500, {
+            ok: false,
+            pkg,
+            version,
+            spec,
+            code: fileBusy ? 'file-busy' : undefined,
+            busyPackage,
+            error: fileBusy
+              ? '文件被占用，已自动重试 3 次仍失败。\n'
+                + (busyPackage ? '被占用的包：' + busyPackage + '\n' : '')
+                + 'Windows 上正在运行的 DSH 仍持有 node_modules 里的文件句柄，升级要替换旧目录所以会被拦住。\n'
+                + '处理办法：关掉 DSH Desktop 后执行 pnpm --dir "' + profileDir + '" add ' + spec + '，或稍后重试。\n'
+                + '\n原始错误：' + detail
+              : detail,
+          })
         } finally {
           installingKey = null
         }

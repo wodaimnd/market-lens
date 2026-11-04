@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { packageNameFromSpec } from '../index.js'
+import { packageNameFromSpec, isFileBusy, busyPackageFrom } from '../index.js'
 
 function jsonResponse(body) {
   const payload = Buffer.from(JSON.stringify(body))
@@ -184,5 +184,49 @@ describe('packageNameFromSpec：从安装目标折出包名', () => {
     assert.equal(packageNameFromSpec(''), null)
     assert.equal(packageNameFromSpec(null), null)
     assert.equal(packageNameFromSpec(undefined), null)
+  })
+})
+
+// 文件占用（EPERM）的识别：这是「点了安装还是失败」的真凶。
+//
+// 现场日志（.plugin-manager/logs/operation-HSeGGy/pnpm.log）：
+//   [ERR_PNPM_EPERM] [importPackage ...\node_modules\@tt-a1i\archify-dsh]
+//   EPERM: operation not permitted, rename '..._tmp_16340_11' -> '...archify-dsh'
+//
+// 关键判断：这类失败绝不能走「降级目标」——那不是版本问题，换个 spec 一样被锁。
+// 之前所有失败一视同仁地试降级，等于拿一个错目标掩盖真实原因。
+describe('isFileBusy：把「文件被占用」和「版本不存在」分开', () => {
+  it('识别真实的 pnpm EPERM（importPackage + rename）', () => {
+    const real = new Error('[ERR_PNPM_EPERM] [importPackage C:/x/node_modules/@tt-a1i/archify-dsh] EPERM: operation not permitted, rename C:/x/archify-dsh_tmp_16340_11 -> C:/x/archify-dsh')
+    assert.equal(isFileBusy(real), true)
+  })
+
+  it('识别 Linux/macOS 的占用错误', () => {
+    assert.equal(isFileBusy(new Error('EBUSY: resource busy or locked')), true)
+    assert.equal(isFileBusy(new Error('ETXTBSY: text file is busy')), true)
+  })
+
+  it('只有 rename _tmp_ 形态也算占用（可能是没有 code 前缀的裸报错）', () => {
+    assert.equal(isFileBusy(new Error("rename 'C:/x/pkg_tmp_1' -> 'C:/x/pkg'")), true)
+  })
+
+  it('版本不存在不算占用：这类才该走降级', () => {
+    assert.equal(isFileBusy(new Error('ERR_PNPM_NO_MATCHING_VERSION No matching version found for foo@9.9.9')), false)
+    assert.equal(isFileBusy(new Error('E404 404 Not Found - GET https://registry.npmjs.org/nope')), false)
+  })
+
+  it('网络错误、子目录不存在都不算占用', () => {
+    assert.equal(isFileBusy(new Error('ETIMEDOUT fetch failed')), false)
+    assert.equal(isFileBusy(new Error('ERR_PNPM_INVALID_PATH not a valid sub-directory')), false)
+  })
+
+  it('能从报错里挖出被占用的包名，给用户可行动的提示', () => {
+    const real = new Error('[ERR_PNPM_EPERM] [importPackage C:/x/node_modules/@tt-a1i/archify-dsh] EPERM: nope')
+    assert.match(busyPackageFrom(real), /archify-dsh$/)
+  })
+
+  it('挖不出包名时返回 null，而不是编一个出来', () => {
+    assert.equal(busyPackageFrom(new Error('ERR_PNPM_EPERM something odd')), null)
+    assert.equal(busyPackageFrom(null), null)
   })
 })
