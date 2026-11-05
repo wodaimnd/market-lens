@@ -496,6 +496,8 @@ window.__ModuleLoader__.load({
         installNoSpec: '这一行没有可用的安装目标，只能复制命令手动装。',
         installNotMounted: '已装好，但没有挂载',
         installNotMountedHint: '文件已下载、也已写进依赖，但它没被加进 profile 的 bundle 列表，重启后不会自动加载。到官方「插件」页把这个包启用一次即可；运行日志里有一条 install.not-mounted 记录。',
+        installHealthBad: '装好了，但加载不了',
+        installHealthBadHint: '文件与挂载都正常，但插件自带的装载行解析不到：{rows}。这类故障 dsh 不会报错，表现就是重启后没有设置页、没有面板。请在「运行日志」页搜 install.health 看完整结论。',
         requirements: '兼容性证据',
         requirementKey: '要求',
         requirementRange: '范围',
@@ -936,6 +938,8 @@ window.__ModuleLoader__.load({
         installNoSpec: 'This row has no install target; copy the command and install manually.',
         installNotMounted: 'Installed, but not mounted',
         installNotMountedHint: 'The files are downloaded and the dependency is saved, but the package was not added to the profile bundle list, so it will not load after a restart. Enable it once from the official Plugins page; the runtime log has an install.not-mounted entry.',
+        installHealthBad: 'Installed, but cannot load',
+        installHealthBadHint: 'Files and mount are fine, but the bundle patch rows do not resolve: {rows}. dsh reports nothing for this — the symptom is a missing settings page or panel after a restart. Open the runtime log and search install.health for the full verdict.',
         requirements: 'Compatibility evidence',
         requirementKey: 'Requirement',
         requirementRange: 'Range',
@@ -5330,18 +5334,31 @@ window.__ModuleLoader__.load({
           // 但重启后 loader 根本不加载它。必须当场说清楚，不能报成绿字。
           const mount = body && body.mount ? body.mount : null
           const mountWarn = Boolean(mount && mount.checked && !mount.mounted)
+          // 第二层：挂载对、但插件自带的装载行解析不到 / peer 冲突 —— 表现同样是
+          // 「装上但不出现」，而在 dsh 自己的日志里一行都不提。这一类也要当场说。
+          const health = body && body.health ? body.health : null
+          const healthBad = Boolean(health && health.verdict === 'bad')
+          const healthWarn = !mountWarn && Boolean(health && health.verdict === 'warn' && !health.unmounted)
+          const healthDetail = health && Array.isArray(health.rows)
+            ? health.rows.filter((row) => row.status === 'unresolved').map((row) => row.name)
+            : []
           showNotice({
-            tone: mountWarn ? 'warn' : 'success',
-            title: mountWarn ? t('installNotMounted') : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded')),
+            tone: mountWarn || healthBad ? 'warn' : 'success',
+            title: mountWarn
+              ? t('installNotMounted')
+              : (healthBad ? t('installHealthBad') : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded'))),
             subtitle: row.pkg || row.title || row.name || null,
             detail: upgradeTo ? upgradeTo : null,
             spec: (body && body.spec) || null,
             hint: mountWarn
               ? t('installNotMountedHint')
-              : (body && body.fellBackFrom ? t('installFallback') : null),
+              : (healthBad
+                ? t('installHealthBadHint').replace('{rows}', healthDetail.join(', ') || (health && health.detail) || '?')
+                : (body && body.fellBackFrom ? t('installFallback') : null)),
             retry: false,
             row: null,
           })
+          void healthWarn
 
           // 目标插件本身没挂载：重启后也不会出现，所以直接落一条日志，方便回看
           if (mountWarn) {

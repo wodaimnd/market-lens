@@ -74,7 +74,11 @@ async function main() {
   }
 
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
-  const rulesPath = path.join(home, 'market-lens', 'scoring-rules.json')
+  // 0.7.0 起规则从「单文件」改成「规则库」：磁盘上只有 scoring-rules-library.json，
+  // 里面**只存用户条目**，内置与预设在包里（不重复落盘）。旧脚本还在找
+  // scoring-rules.json，所以必然报「规则文件没写盘」—— 这是脚本口径过期，不是功能坏了。
+  const rulesPath = path.join(home, 'market-lens', 'scoring-rules-library.json')
+  const legacyRulesPath = path.join(home, 'market-lens', 'scoring-rules.json')
   const cachePath = path.join(home, 'market-lens', 'catalog.json')
   const cacheSizeBefore = fs.existsSync(cachePath) ? fs.statSync(cachePath).size : 0
 
@@ -114,25 +118,51 @@ async function main() {
   line('top marketParts', JSON.stringify(parts))
   if (parts.length !== 1 || parts[0].key !== 'fresh') throw new Error('评分构成没有跟着规则变')
 
-  // ---- 3. 落盘：规则文件 + catalog 缓存都要更新 ----
+  // ---- 3. 落盘：规则库 + catalog 缓存都要更新 ----
   const cacheSizeAfter = fs.existsSync(cachePath) ? fs.statSync(cachePath).size : 0
-  line('rules file', fs.existsSync(rulesPath) ? 'written (' + fs.statSync(rulesPath).size + ' bytes)' : 'MISSING')
+  line('rules library', fs.existsSync(rulesPath)
+    ? 'written (' + fs.statSync(rulesPath).size + ' bytes)'
+    : 'MISSING')
+  line('legacy rules file', fs.existsSync(legacyRulesPath) ? '仍然存在（0.6.0 迁移没完成？）' : '已清理')
   line('catalog cache', cacheSizeBefore + ' → ' + cacheSizeAfter + ' bytes')
-  if (!fs.existsSync(rulesPath)) throw new Error('规则文件没写盘')
+  if (!fs.existsSync(rulesPath)) throw new Error('规则库没写盘')
+  if (fs.existsSync(legacyRulesPath)) throw new Error('0.6.0 的单文件规则应当已迁进规则库并删除')
+  let library = null
+  try {
+    library = JSON.parse(fs.readFileSync(rulesPath, 'utf8'))
+  } catch (error) {
+    throw new Error('规则库不是合法 JSON：' + String(error && error.message ? error.message : error))
+  }
+  line('library entries', (library?.entries || []).length)
+  line('library activeId', String(library?.activeId ?? '(none)'))
+  // 只存用户条目：内置口径不许重复落盘，否则换版本后内置更新会被旧副本盖住
+  // 条目上区分来源的字段是 origin（builtin / preset / user），不是 source —— 用错字段
+  // 会把内置条目全判成「重复落盘」，这条断言就失去意义了。
+  const userEntries = (library?.entries || []).filter((entry) => entry && entry.origin === 'user')
+  const duplicates = (library?.entries || []).filter((entry) => entry && (entry.builtin === true || entry.origin === 'builtin' || entry.origin === 'preset'))
+  line('library user entries', userEntries.length)
+  line('library built-in copies', duplicates.length + '（应为 0：内置随包发布，不落盘）')
+  if (duplicates.length) throw new Error('内置 / 预设条目被重复落盘了：' + duplicates.map((entry) => entry.id).join(', '))
 
   // ---- 4. 日志：这一串动作应当全都被记下来 ----
   const logs = await call({ op: 'logs', limit: 50 })
   line('logs entries', (logs.body?.entries || []).length)
   const tags = (logs.body?.entries || []).map((entry) => entry.tag)
   line('logs tags', tags.join(' · '))
-  if (!tags.includes('rules.applied')) throw new Error('rules.applied 没有记进日志')
+  // 0.7.0 的真实埋点是 rules.added / rules.activated / rules.removed。
+  // 旧脚本查的 rules.applied 从来没有存在过（0.6.0 就已经改名为 activated）。
+  if (!tags.some((tag) => tag === 'rules.added' || tag === 'rules.activated')) {
+    throw new Error('规则变更没有记进日志：' + tags.join(', '))
+  }
 
-  // ---- 5. 恢复内置规则：文件要删掉、分数要回到默认口径 ----
+  // ---- 5. 恢复内置规则：activeId 指回内置、用户条目清空、分数回默认口径 ----
+  //
+  // 0.7.0 的语义变了：「恢复内置」不再删文件，只是把 activeId 指回内置条目。
+  // 所以这里断言的是「库里没有用户条目 + 分数回到默认」，不是「文件消失」。
   start = Date.now()
   const reset = await call({ op: 'rules.reset' })
   line('rules.reset', reset.status + ' in ' + (Date.now() - start) + 'ms')
   if (reset.status !== 200) throw new Error('rules.reset 失败')
-  if (fs.existsSync(rulesPath)) throw new Error('恢复内置之后规则文件仍然存在')
 
   start = Date.now()
   const back = await call({ op: 'catalog' })

@@ -45,6 +45,66 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.8.0：安装后到底能不能加载 —— 三层装机体检
+
+装插件最贵的问题从来不是「装不上」，而是**装上了但不出现**：点在面板上「装」，回执是绿的，重启后却没有设置页、没有面板、没有数据目录，dsh 的日志里一行都不提。0.8.0 把这条链路拆成三层，每层都查，结论一次说清。
+
+### 第一层：挂载判定要认对包名
+
+旧逻辑直接拿 `pluginManager.installBundle()` 返回的 `name` 去和 `dsh.profile.bundles` 比对。但管理器的返回值经常带版本号：
+
+```
+{ name: 'dsh-wechat-remote@1.7.15', bundle: 'dsh-wechat-remote', changed: true }
+```
+
+于是比对永远不相等，**明明挂上了却报「已装好，但没有挂载」**。真机日志里 `dsh-mp-automator` 那条就是这个形状：`packageName: 'dsh-mp-automator@0.3.0'` + `mounted: false`，而它其实在 bundles 里。
+
+现在每个候选（`bundle` / `name` / `target` / `packageName` / `spec`）都先经 `packageNameFromSpec` 折成纯包名，折不出（`link:` / 本地路径）就跳过试下一个。另外，**只有声明了 `dsh.bundle` 的包才会被加进 bundles**；普通依赖永远不会出现，对它们报「没挂载」只会把人引到错误的页面。
+
+### 第二层：插件自带的装载行能不能解析
+
+bundle 进了列表还不够。真正决定「有没有面板」的是包自带 `cordis.patch.yml` 里那些 `- insert:` 行：
+
+```yaml
+- insert:
+    - id: gate
+      name: './native/index.js'
+    - id: wechat-clawbot
+      name: 'dsh-wechat-remote/clawbot'
+```
+
+**任何一条解析不到，宿主半身与浏览器半身会一起不挂**，而 dsh 照旧安静。判定口径照抄 loader，不自创：
+
+- 相对路径行 → 按 patch 文件所在目录解析（loader 就是这么做的）
+- 裸名 / scoped 名 → 先试包内自引用（`<自己包名>/subpath` 必须命中包自己的 `exports`），再试 profile
+- 兜底用 loader 的 `packageDirFromAnchor` 口径：**只看目录里有没有 `package.json`**
+
+最后这条很关键：`dsh-wechat-remote` 的 `exports` 里没有 `"."`，`require.resolve('dsh-wechat-remote')` 会报 `ERR_PACKAGE_PATH_NOT_EXPORTED`，但它的 bundle 挂得上。只按 `require.resolve` 判会把这类包全判成故障。
+
+反过来，**子路径行**（`pkg/sub`）解析不到就是真的挂不上，不能拿「包目录在」蒙混过去——那是 `pkg@1.7` 删掉某个出口后最典型的失效形态。
+
+### 第三层：peer 与输出结论
+
+peer 判定与 `dsh-app-boot` 的 `unmetRequirements` 逐字一致：有 `engines.dsh` 就只看它，否则只看 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*` 前缀的 peer，且 range 是**与运行时版本**比较（这是 dsh 的独特约定）。
+
+三层合起来给一个 `verdict`：
+
+| verdict | 含义 | 界面 |
+| --- | --- | --- |
+| `ok` | 装好、挂好、装载行全通、peer 满足 | 绿色「安装完成」 |
+| `warn` | 依赖写了但没进 bundles | 橙色「已装好，但没有挂载」 |
+| `bad` | 装载行解析不到 / peer 冲突 | 橙色「装好了，但加载不了」，并把解析不到的行名直接列出来 |
+
+`install.health` 会落进运行日志。注意传的是**扁平字符串数组**——`OpLog` 只保留标量与小数组，传 `[{status, name}]` 会被静默过滤成 `[]`，最关键的行名反而丢了（这是踩过的）。
+
+### 顺手修掉：运行时版本恒为 null
+
+`lib/runtime.js` 只找 `<asar>/node_modules/@deepseek-ai/dsh-app-boot/package.json`。当前的 desktop 布局是 `<asar>/dsh/node_modules/...`，于是 `runtimeVersion` 恒为 `null`，全表兼容性统统变成 `unknown`——这不是「查不出来」，是**查错了地方**。现在两种布局都试。
+
+验证：`runtime: 0.2.1-rc.5`，来源标成 `app.asar:app-boot(dsh/node_modules/...)`。
+
+---
+
 ## 0.7.0：规则库 + 下拉选择 + 可读的模版说明
 
 0.6.0 的规则是「一个当前文件」，上传即覆盖。用久了就显出问题：想临时切回内置看看差距、再切回自己的那份，只能重新上传一遍；分享别人给你的规则，等于把自己的替换掉。

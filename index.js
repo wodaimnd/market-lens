@@ -49,6 +49,7 @@ import {
   writeJsonAtomic,
 } from './lib/runtime.js'
 import { fetchJson, pickText, sleep } from './lib/util.js'
+import { inspectInstalledHealth, parsePatchRows, classifyRowName } from './lib/health.js'
 import { OpLog } from './lib/op-log.js'
 import {
   BUILT_IN_PRESETS,
@@ -796,32 +797,79 @@ export function apply(ctx) {
    *   - 包名在 bundles 里 → mounted；
    *   - 不在 → 明确回报，并给出重启后仍不出现时的下一步。
    *
-   * @returns {{packageName: string|null, mounted: boolean, checked: boolean, reason: string|null, bundles: string[]}}
+   * @returns {{packageName: string|null, mounted: boolean, checked: boolean, reason: string|null, isBundle: boolean, bundles: string[]}}
    */
   function inspectMount(spec, result) {
-    const fromResult = result && typeof result === 'object'
-      ? [result.bundle, result.name, result.target, result.packageName].find((value) => typeof value === 'string' && value.trim())
-      : null
-    const packageName = (fromResult || packageNameFromSpec(spec) || '').trim().toLowerCase() || null
+    // 管理器返回的 name 经常带版本（`dsh-mp-automator@0.3.0`），直接拿去和 bundles 比对
+    // 永远不等 —— 于是「装好了也没挂载」这种假警报会盖住真正没挂载的那一次。
+    // 所以每个候选都先折成纯包名，折不出（本地路径 / link）就跳过，继续试下一个。
+    const candidates = result && typeof result === 'object'
+      ? [result.bundle, result.name, result.target, result.packageName, spec]
+      : [spec]
+    let packageName = null
+    for (const candidate of candidates) {
+      const folded = packageNameFromSpec(typeof candidate === 'string' ? candidate : '')
+      if (folded) {
+        packageName = folded.toLowerCase()
+        break
+      }
+    }
     if (!packageName) {
-      return { packageName: null, mounted: false, checked: false, reason: 'unresolved-package-name', bundles: [] }
+      return { packageName: null, mounted: false, checked: false, reason: 'unresolved-package-name', isBundle: false, bundles: [] }
     }
     let manifest
     try {
       manifest = readJson(path.join(profileDir, 'package.json')) || {}
     } catch (error) {
-      return { packageName, mounted: false, checked: false, reason: 'profile-unreadable: ' + message(error), bundles: [] }
+      return { packageName, mounted: false, checked: false, reason: 'profile-unreadable: ' + message(error), isBundle: false, bundles: [] }
     }
     const bundles = Array.isArray(manifest?.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
     const lowered = bundles.map((entry) => String(entry).toLowerCase())
     const mounted = lowered.includes(packageName)
+    // 只有声明了 dsh.bundle 的包才会被加进 bundles。普通依赖（比如只是被拖进来的
+    // 传递依赖）永远不会出现，那不是故障，报「没挂载」只会把人引到错误的页面。
+    let isBundle = true
+    try {
+      const installedManifest = readJson(path.join(profileDir, 'node_modules', packageName, 'package.json'))
+      if (installedManifest) isBundle = Boolean(installedManifest?.dsh?.bundle)
+    } catch {
+      // 读不到就按「是 bundle」处理：这是最常见的失败形态，宁可提示也不要沉默
+    }
+    if (mounted) {
+      return { packageName, mounted: true, checked: true, reason: null, isBundle, bundles: lowered }
+    }
+    if (!isBundle) {
+      return { packageName, mounted: false, checked: false, reason: 'not-a-bundle', isBundle: false, bundles: lowered }
+    }
     return {
       packageName,
-      mounted,
+      mounted: false,
       checked: true,
-      reason: mounted ? null : 'not-in-bundles',
+      reason: 'not-in-bundles',
+      isBundle,
       bundles: lowered,
     }
+  }
+
+  /**
+   * 装完之后的落地体检（见 lib/health.js）。这里只补上下文：profile 目录、
+   * 当前 bundles、运行时版本，然后交给纯函数判定，便于单测直接覆盖。
+   */
+  function installedHealth(packageName, spec) {
+    let bundles = []
+    try {
+      const manifest = readJson(path.join(profileDir, 'package.json')) || {}
+      bundles = Array.isArray(manifest?.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
+    } catch {
+      // profile 读不到时按空列表判定：不会误判成「已挂载」
+    }
+    return inspectInstalledHealth({
+      profileDir,
+      packageName,
+      bundles,
+      runtimeVersion: runtime?.runtimeVersion ?? runtime?.appVersion ?? null,
+      spec: spec ?? null,
+    })
   }
 
   /**
@@ -2283,10 +2331,31 @@ export function apply(ctx) {
           const mount = inspectMount(effectiveSpec, result)
           logger?.info?.('[market-lens] install ok spec=' + effectiveSpec + ' origin=' + String(resolved.origin) + ' ' + (Date.now() - startedAt) + 'ms')
           logInstall('info', 'install.ok', { key: row?.key || key || null, spec: effectiveSpec, fellBackFrom, origin: resolved.origin || 'manual', ms: Date.now() - startedAt, summary: summarizeInstallResult(result), mounted: mount.mounted, packageName: mount.packageName })
-          if (!mount.mounted) {
+          if (mount.checked && !mount.mounted) {
             // 依赖装上了但没进 bundle 层：这不是失败（文件确实装好了、也能在
             // 已安装清单里看到），但必须直说，否则用户会以为下次启动就能用。
             logInstall('warn', 'install.not-mounted', { key: key || '(empty)', spec: effectiveSpec, packageName: mount.packageName, reason: mount.reason })
+          }
+          // 装机链路体检：常见故障在这里一次说清，而不是让用户重启才发现。
+          // 两条最贵的坑：
+          //   · 依赖里有、bundles 里没有 → 重启后插件不出现（install.not-mounted 那条）；
+          //   · 插件自带 patch 的行解析不到 → 宿主半身与浏览器半身一起不挂（dsh 不报错）；
+          //   · peer 要求的 dsh 版本超过当前运行时 → 启动预检直接拒绝加载。
+          const health = installedHealth(mount.packageName, effectiveSpec)
+          if (health.rows.length || health.unmounted || (health.peers && health.peers.status === 'bad')) {
+            // 注意：这里要传**扁平的字符串数组**。OpLog.sanitize 只保留标量与小数组，
+            // 传对象数组会被过滤成空数组 —— 真实踩过：install.health 的 rows 落进日志
+            // 全是 []，最关键的那几条行名反而丢了。
+            logInstall('info', 'install.health', {
+              spec: effectiveSpec,
+              packageName: mount.packageName,
+              verdict: health.verdict,
+              detail: health.detail,
+              rows: health.rows.map((row) => row.status + ':' + (row.id ? row.id + '=' : '') + row.name),
+              unresolved: health.rows.filter((row) => row.status === 'unresolved').map((row) => row.name),
+              unmounted: health.unmounted,
+              peers: health.peers ? health.peers.status + ':' + String(health.peers.reason) : null,
+            })
           }
           return sendJson(res, 200, {
             ok: true,
@@ -2297,6 +2366,7 @@ export function apply(ctx) {
             installed: installedState(),
             result: summarizeInstallResult(result),
             mount,
+            health,
           })
         } catch (cause) {
           // 有的管理器把 pendingBuilds 直接挂在错误对象上，有的只写进错误文本；
