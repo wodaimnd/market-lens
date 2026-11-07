@@ -2692,6 +2692,12 @@ export function apply(ctx) {
               // （loader 要下一个 tick 才挂），所以这里如实记，别当成失败。
               staticVerdict: health.staticVerdict ?? null,
               activation: health.activation ? String(health.activation.phase) : 'unknown',
+              // 第五层：配置条件。装了、能加载、甚至跑起来了，但缺外部配置时
+              // 结论是 needs-config —— 用户看到的现象正是「显示已安装但用不了」。
+              // 只记 env 变量名与状态，**绝不记值**（日志会被导出分享）。
+              configNeeded: health.config && health.config.required
+                ? (health.config.entries || []).map((entry) => entry.key + '=' + entry.status + '(' + entry.env.join('|') + ')').join(', ')
+                : null,
             })
           }
           // 成功：清掉失败标记，并把这一行的按钮按新状态重算。

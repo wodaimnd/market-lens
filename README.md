@@ -61,6 +61,74 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.14.0：第五层体检——装好了，但要配置才能用
+
+### 问题
+
+真机案例（`@wxg-prc-cpg/dsh-weknora@0.1.0`，`dsh 0.2.2-rc.1`）：
+
+```
+pnpm 日志：+ @wxg-prc-cpg/dsh-weknora 0.1.0   Done in 3.1s
+profile：dep=0.1.0  inBundles=True  node_modules 有 package.json
+四层体检：verdict=ok  装载行 [ok] weknora → dist/index.js
+loader 重放：skipped=[]  compat veto=false
+运行时日志：dsh-weknora: registered weknora_list_knowledge_bases,
+           weknora_search, weknora_read_document, weknora_ask
+           against http://localhost:8080/api/v1
+```
+
+**装对了、加载了、跑起来了、工具全注册了。** 但 `localhost:8080` 上没有服务：
+
+```
+8080 不可达: 由于目标计算机积极拒绝，无法连接
+WEKNORA_BASE_URL / WEKNORA_API_KEY / ... 全部未设置
+```
+
+用户看到的是「显示已安装，但没有安装成功」。这不是安装问题，是**配置缺失**。
+
+前四层都看不见它：`fiberPhase` 是 `active`，因为"注册工具"这一步确实成功了；`active` 但功能不通和 `active` 且功能正常，在旧判定里一模一样。
+
+### 现在：第五层，读 patch 里的配置条件
+
+新增 `lib/requires-config.js`：解析包自带 `cordis.patch.yml` 里的 `config:` 段，抽出所有 `!!js` 表达式、里面的 `process.env.X` 引用、以及 `?? '默认值'` 回退值。
+
+`weknora` 的真实 patch 被完整解析：
+
+```
+baseUrl          → WEKNORA_BASE_URL          ?? 'http://localhost:8080/api/v1'
+apiKey           → WEKNORA_API_KEY           （无默认值）
+knowledgeBaseIds → WEKNORA_KNOWLEDGE_BASE_IDS ?? ''
+agentId          → WEKNORA_AGENT_ID          （无默认值）
+```
+
+按三种状态归类：
+
+| status | 判据 | 含义 |
+| --- | --- | --- |
+| `satisfied` | 环境变量已设 | 不报 |
+| `placeholder` | 没设，且默认值指向 localhost / 回环 / `your-x` / `<...>` | **一定会失败** → 阻断 |
+| `missing` | 没设，也没有默认值 | 拿到 `undefined` → 提醒 |
+| `optional` | 没设，但有正经默认值 | 能跑，只是没按你的意思配 → 提示 |
+
+新增 verdict 档：**`needs-config`**。界面显示「装好了，但要配置才能用」，并点名哪个环境变量。
+
+### 两条判据上的取舍
+
+**只有 `placeholder` 算阻断。** 静态读 patch 时没法知道哪个配置项必需——`baseUrl` 缺了会退回 localhost（必然失败），但 `knowledgeBaseIds` / `agentId` 缺了往往只是少几个能力。把 `missing` 也判死，会把"只差一个可选项"的插件报成"用不了"；误报一多，用户就不再相信这个提示。
+
+**敏感值绝不回显。** 名字里带 `api-key` / `token` / `secret` / `password` / `credential` / `auth` 的项，detail 只写"（敏感值，不显示）"，绝不把默认值或实际值写进响应。这些会进运行日志，而日志是要被导出分享的。
+
+### 与 `fiberPhase` 的关系
+
+`needs-config` 不会被 `active` 覆盖——这是两组不同的事实：
+
+- `activated`：**而且真的跑起来了**
+- `needs-config`：确实跑起来了，但**缺外部条件所以用不了**
+
+混成一个，用户就分不清"要不要修"。
+
+---
+
 ## 0.13.0：兼容性拦截给一条真的能走的路
 
 ### 问题

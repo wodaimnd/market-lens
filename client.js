@@ -539,6 +539,8 @@ window.__ModuleLoader__.load({
         installHealthBadHint: '文件与挂载都正常，但插件自带的装载行解析不到：{rows}。这类故障 dsh 不会报错，表现就是重启后没有设置页、没有面板。请在「运行日志」页搜 install.health 看完整结论。',
         installInactive: '装好了，但没激活',
         installInactiveHint: '依赖、挂载、装载行都正常，但插件运行时状态是 {phase}，不是 active。这种情况重启后插件不会出现。请到官方「插件」页确认它已启用，仍不行就看运行日志里 install.health 的 activation 字段。',
+        installNeedsConfig: '装好了，但要配置才能用',
+        installNeedsConfigHint: '安装与加载都成功，但这个插件依赖外部配置，而下面这些还没满足：{keys}。它现在能启动，但相关功能一用就会失败——这不是安装失败。详见插件的 README，配好环境变量后重启 DSH。',
         requirements: '兼容性证据',
         requirementKey: '要求',
         requirementRange: '范围',
@@ -1026,6 +1028,8 @@ window.__ModuleLoader__.load({
         installHealthBadHint: 'Files and mount are fine, but the bundle patch rows do not resolve: {rows}. dsh reports nothing for this — the symptom is a missing settings page or panel after a restart. Open the runtime log and search install.health for the full verdict.',
         installInactive: 'Installed, but not activated',
         installInactiveHint: 'Dependencies, mount and patch rows are all fine, but the runtime state is {phase}, not active — the plugin will not appear after a restart. Confirm it is enabled on the official Plugins page; if it still fails, check the activation field of install.health in the runtime log.',
+        installNeedsConfig: 'Installed, but needs configuration',
+        installNeedsConfigHint: 'Install and load both succeeded, but this plugin depends on external configuration and these are not satisfied: {keys}. It starts fine, yet the related features fail on first use — this is not an install failure. See the plugin README, set the environment variables, and restart DSH.',
         requirements: 'Compatibility evidence',
         requirementKey: 'Requirement',
         requirementRange: 'Range',
@@ -5668,20 +5672,32 @@ window.__ModuleLoader__.load({
           const healthInactive = Boolean(health && (
             health.verdict === 'installed-not-active' || health.verdict === 'installed-disabled'
           ))
+          // 第五层：装了、能加载、甚至跑起来了，但缺外部配置 —— 用不了。
+          // 真机案例 dsh-weknora：工具全注册成功（fiber active），
+          // 但连的是 patch 默认值 localhost:8080，那里没有服务。
+          // 用户看到的就是「显示已安装但没有安装成功」。
+          const healthNeedsConfig = Boolean(health && health.verdict === 'needs-config')
+          const configKeys = healthNeedsConfig && health.config && Array.isArray(health.config.entries)
+            ? health.config.entries
+              .filter((entry) => entry.status !== 'satisfied')
+              .map((entry) => entry.env.join('/') + '（' + entry.status + '）')
+            : []
           const healthWarn = !mountWarn && Boolean(health && health.verdict === 'warn' && !health.unmounted)
           const healthDetail = health && Array.isArray(health.rows)
             ? health.rows.filter((row) => row.status === 'unresolved').map((row) => row.name)
             : []
           const healthPhase = health && health.activation ? String(health.activation.phase) : null
           showNotice({
-            tone: mountWarn || healthBad || healthInactive ? 'warn' : 'success',
+            tone: mountWarn || healthBad || healthInactive || healthNeedsConfig ? 'warn' : 'success',
             title: mountWarn
               ? t('installNotMounted')
               : (healthBad
                 ? t('installHealthBad')
                 : (healthInactive
                   ? t('installInactive')
-                  : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded')))), 
+                  : (healthNeedsConfig
+                    ? t('installNeedsConfig')
+                    : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded'))))),
             subtitle: row.pkg || row.title || row.name || null,
             detail: upgradeTo ? upgradeTo : null,
             spec: (body && body.spec) || null,
@@ -5691,7 +5707,9 @@ window.__ModuleLoader__.load({
                 ? t('installHealthBadHint').replace('{rows}', healthDetail.join(', ') || (health && health.detail) || '?')
                 : (healthInactive
                   ? t('installInactiveHint').replace('{phase}', healthPhase || (health && health.detail) || '?')
-                  : (body && body.fellBackFrom ? t('installFallback') : null))),
+                  : (healthNeedsConfig
+                    ? t('installNeedsConfigHint').replace('{keys}', configKeys.join('、') || (health && health.detail) || '?')
+                    : (body && body.fellBackFrom ? t('installFallback') : null)))),
             retry: false,
             row: null,
           })
