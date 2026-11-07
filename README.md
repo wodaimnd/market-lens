@@ -61,6 +61,80 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.15.0：安装钩子——它会不会改写你的 profile
+
+### 事故
+
+`dsh-purge@1.1.92` 安装是**成功**的，四层体检全绿。但 pnpm 日志里有这么几行：
+
+```
+node_modules/dsh-purge postinstall$ node scripts/ensure-profile-bundle.mjs
+dsh-purge: appended to bundles (C:\Users\Shinelon\.dsh\profiles\next)
+dsh-purge: wrote body insert (...\profiles\next\cordis.patch.yml)
+```
+
+profile 的 `cordis.patch.yml` 因此多出一整段：
+
+```yaml
+- insert:
+    - id: dsh-purge
+      name: dsh-purge
+      inject: [systemPrompt, tools]        # ← 拿到了系统提示词注入权
+      config:
+        stripMnemon: true
+        capabilityProtocol: true
+        hooksDenyBypass: true
+```
+
+**它改了你的 profile 配置，还拿到了 `systemPrompt` 注入权限。** 而体检什么都没说，因为安装本身确实成功了。
+
+### 为什么 DSH 不报
+
+宿主的 `pendingBuilds` 只在 pnpm **失败**时记录：
+
+```js
+if (!succeeded) {
+  result.pendingBuilds = await recordPendingBuilds(this.profile.dir, run.output)
+  throw new Error(run.output)
+}
+```
+
+构建脚本一旦被允许、并且**跑成功**了，它改了什么没人知道。
+
+### 现在：安装钩子单独上屏
+
+新增 `lib/postinstall.js`，读 `package.json` 的 `scripts`，两档判据：
+
+| verdict | 判据 | 界面含义 |
+| --- | --- | --- |
+| `none` | 没有 `preinstall` / `install` / `postinstall` | 不提示 |
+| `writes-profile` | 钩子命令里出现 `cordis.patch` / `dsh.profile` / `profiles?` / `bundles` / `package.json` | **它会改写你的 profile 配置** |
+| `runs-build` | 有安装钩子，但看不出改 profile | **它会在你机器上执行任意代码** |
+
+`inspectInstalledHealth` 的返回值多一个 `hooks` 字段，`install.health` 日志也记一笔。
+
+### 一条克制：不读脚本体
+
+只读 `package.json` 里的 `scripts` 命令文本，**不去读、不去执行**脚本体。
+
+读脚本体要 resolve 一堆路径、处理 `node x.mjs` / `sh -c` / `&&` 链、还要防递归 —— 成本远大于收益，而命令本身（尤其 `ensure-profile-bundle.mjs` 这种名字）已经足够说明问题。
+
+所以 `runs-build` 这一档**不装作知道它在干什么**：
+
+```
+安装时会执行 postinstall: node-gyp rebuild。这类脚本能在你的机器上跑任意代码，
+事后是否改写 profile 无法静态判断 —— 装完可以对照
+profiles/<name>/package.json 与 cordis.patch.yml 是否变化。
+```
+
+给出自查手段，而不是给一个"安全"的假结论。
+
+### 它不进 verdict
+
+装了、能加载、能跑、配置齐 —— 四层全绿也照样可能在安装时改了 profile。所以 `hooks` 是**独立字段**，不参与 `verdict`，界面可以单独说这一句。
+
+---
+
 ## 0.14.1：宿主返回失败结果而不是抛出——静默拒绝
 
 ### 事故

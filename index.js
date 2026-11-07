@@ -2765,6 +2765,9 @@ export function apply(ctx) {
               configNeeded: health.config && health.config.required
                 ? (health.config.entries || []).map((entry) => entry.key + '=' + entry.status + '(' + entry.env.join('|') + ')').join(', ')
                 : null,
+              // 安装钩子：会跑代码 / 会改 profile 的包，装完之后必须留一笔。
+              // dsh-purge 就是这样改了 cordis.patch.yml，而四层体检全绿。
+              hooks: health.hooks ? health.hooks.verdict + ':' + (health.hooks.hooks || []).map((entry) => entry.hook).join('|') : null,
             })
           }
           // 成功：清掉失败标记，并把这一行的按钮按新状态重算。
