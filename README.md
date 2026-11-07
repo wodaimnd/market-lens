@@ -61,6 +61,70 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.14.1：宿主返回失败结果而不是抛出——静默拒绝
+
+### 事故
+
+日志里明明写着**两次成功**：
+
+```
+[market-lens] install ok spec=dsh-tidy-display@0.4.7 origin=catalog 2338ms
+[market-lens] install ok spec=dsh-tidy-display@0.4.7 origin=catalog 1730ms
+```
+
+但宿主实际输出是：
+
+```
+dsh: installation rejected: Plugin dsh-tidy-display@0.4.7 is incompatible with dsh 0.2.2-rc.1
+dsh: nothing was installed.
+```
+
+profile 里那个包一直是 `link:` 装的老副本，**什么都没变**。用户看到「已安装」，就以为装成了。
+
+### 根因
+
+宿主 `pluginManager` 的 `change()` 把操作异常**吞进结果对象，不向外抛**：
+
+```js
+catch (error) {
+  result.application = 'failed'        // ← 不是 throw
+  result.error = managementError(error)
+}
+```
+
+所以 `installBundle` / `upgrade` 会**正常 resolve** 成：
+
+```js
+{ application: 'failed', changed: false,
+  error: { code: 'incompatible-version', incompatible: [...] } }
+```
+
+而 market-lens 只 `catch` 抛出的异常，从不看返回值的 `application` —— 于是把拒绝记成了成功。
+
+### 修法
+
+`install` 与 `upgrade` 两条路径都检查 `result.application === 'failed'`，命中就走失败分支：
+
+- 日志改成 `install.rejected-by-host` / `upgrade.rejected-by-host`，不再有 `install.ok`
+- 回 500，并带上 `layer` / `action` / `incompatible` —— 和普通失败同一套分层结论
+- `incompatible-version` 时仍然给出 `exemption`（0.13.0 的豁免路径）
+
+读取宿主错误对象时注意字段名：`managementError()` 给的是
+
+| 错误类型 | 形状 |
+| --- | --- |
+| `ManagementFailure` | `{ code, incompatible? }` |
+| 其它 | `{ code: 'operation-error', diagnostic }` |
+
+**是 `diagnostic`，不是 `message`。** 读错字段会得到一个空的失败原因。
+
+### 边界
+
+- `application: 'restart-required'` 是**成功**（没有 HMR 时要重启才生效）
+- 完全没有 `application` 字段的旧宿主仍按成功处理 —— 不认识的形状不能当成失败
+
+---
+
 ## 0.14.0：第五层体检——装好了，但要配置才能用
 
 ### 问题

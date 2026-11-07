@@ -2652,6 +2652,73 @@ export function apply(ctx) {
               error: '安装需要允许构建脚本：' + pendingBuilds.join(', '),
             })
           }
+
+          // ---- 必须检查返回值的 application，不能只看有没有抛出 ----
+          //
+          // 宿主 pluginManager 的 `change()` 把操作异常**吞进结果对象**，不向外抛：
+          //
+          //   catch (error) {
+          //     result.application = 'failed'        // ← 不是 throw
+          //     result.error = managementError(error)
+          //   }
+          //
+          // 于是兼容性拒绝这类失败会**正常返回**一个对象：
+          //   { application: 'failed', error: {...}, changed: false }
+          // 而它的输出里明明写着 "installation rejected ... nothing was installed"。
+          //
+          // 真机事故（2026-11-07）：dsh-tidy-display@0.4.7 被 incompatible-version
+          // 拒绝两次，market-lens 两次都记成 `install ok` —— 因为只 catch 了抛出。
+          // 用户看到「已安装」，实际什么都没装。
+          const application = typeof result?.application === 'string' ? result.application : null
+          const silentFailure = application === 'failed'
+          if (silentFailure) {
+            const managementError = result?.error && typeof result.error === 'object' ? result.error : null
+            const code = managementError && typeof managementError.code === 'string' ? managementError.code : null
+            // 宿主 managementError() 的字段是 **diagnostic**（不是 message）：
+            //   ManagementFailure → { code, incompatible? }
+            //   其它错误          → { code: 'operation-error', diagnostic }
+            const hostText = managementError
+              ? (typeof managementError.diagnostic === 'string' && managementError.diagnostic.trim()
+                ? managementError.diagnostic
+                : (typeof managementError.message === 'string' ? managementError.message : ''))
+              : ''
+            const detail = hostText
+              ? (code ? code + ': ' : '') + hostText
+              : (typeof result?.output === 'string' && result.output.trim() ? result.output.trim().slice(-2000) : '宿主拒绝了安装，但没给出原因')
+            logger?.info?.('[market-lens] install silently rejected spec=' + effectiveSpec + ' code=' + String(code) + ' app=' + String(application))
+            logInstall('error', 'install.rejected-by-host', {
+              key: key || '(empty)',
+              spec: effectiveSpec,
+              fellBackFrom,
+              origin: resolved.origin,
+              ms: Date.now() - startedAt,
+              application,
+              code,
+              incompatible: managementError?.incompatible
+                ? managementError.incompatible.map((item) => String(item?.name ?? item)).join(', ')
+                : null,
+              detail: String(detail).slice(0, 800),
+            })
+            const failure = classifyInstallFailure({ code, message: String(detail) }, detail)
+            markInstallFailure(row?.key || key || '', true)
+            return sendJson(res, 500, {
+              ok: false,
+              spec: effectiveSpec,
+              fellBackFrom,
+              origin: resolved.origin,
+              // 这一条是「宿主返回了失败结果，而不是抛出」——前端要能分辨
+              code: code || failure.code || 'host-refused',
+              layer: failure.layer,
+              retryable: failure.retryable,
+              action: failure.action,
+              evidence: failure.evidence,
+              incompatible: managementError?.incompatible || failure.incompatible,
+              exemption: failure.layer === FAILURE_LAYERS.compat ? incompatibleVerdict(effectiveSpec) : null,
+              detail,
+              error: detail,
+            })
+          }
+
           // 15 秒缓存里还是装之前的依赖表，不清掉这一轮 refresh 会把刚装好的行写回未安装。
           invalidateInstalledCache()
           refreshInstalledOnRows()
@@ -2880,6 +2947,37 @@ export function apply(ctx) {
           const options = { enabled: true, saveExact: true }
           if (approvedBuilds.length) options.approvedBuilds = approvedBuilds
           const result = await runInstallWithRetry(manager, spec, options, { key: pkg, origin: 'upgrade' })
+          // 与 install 同理：宿主把失败吞进返回值的 application，不抛出。
+          // 升级路径同样会撞 incompatible-version，不查就会记成「升级完成」。
+          if (typeof result?.application === 'string' && result.application === 'failed') {
+            const managementError = result?.error && typeof result.error === 'object' ? result.error : null
+            const code = managementError && typeof managementError.code === 'string' ? managementError.code : null
+            const hostText = managementError
+              ? (typeof managementError.diagnostic === 'string' && managementError.diagnostic.trim()
+                ? managementError.diagnostic
+                : (typeof managementError.message === 'string' ? managementError.message : ''))
+              : ''
+            const detail = hostText
+              ? (code ? code + ': ' : '') + hostText
+              : (typeof result?.output === 'string' && result.output.trim() ? result.output.trim().slice(-2000) : '宿主拒绝了升级')
+            const failure = classifyInstallFailure({ code, message: String(detail) }, String(detail))
+            upgradeLog('error', 'upgrade.rejected-by-host', { version, spec, ms: Date.now() - startedAt, application: result.application, code, detail: String(detail).slice(0, 800) })
+            return sendJson(res, 500, {
+              ok: false,
+              pkg,
+              version,
+              spec,
+              code: code || failure.code || 'host-refused',
+              layer: failure.layer,
+              retryable: failure.retryable,
+              action: failure.action,
+              evidence: failure.evidence,
+              incompatible: managementError?.incompatible || failure.incompatible,
+              exemption: failure.layer === FAILURE_LAYERS.compat ? incompatibleVerdict(spec) : null,
+              detail,
+              error: detail,
+            })
+          }
           const pendingBuilds = Array.isArray(result?.pendingBuilds)
             ? result.pendingBuilds.filter((name) => typeof name === 'string' && name)
             : []
