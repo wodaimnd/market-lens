@@ -220,10 +220,16 @@ function makeFetch(log, options = {}) {
           result: { name: '@acme/tool', version: '1.2.3' },
         })
       }
+      // 失败响应现在带**分层结论**（layer / action / evidence / retryable），
+      // 前端不认旧的自造码，只按这几个字段渲染。
       return fail(500, {
         error: 'ERR_PNPM_NO_MATCHING_VERSION No matching version found for @acme/tool@1.2.3',
         spec: '@acme/tool@1.2.3',
-        code: 'subdir-missing',
+        code: 'ERR_PNPM_NO_MATCHING_VERSION',
+        layer: 'version',
+        action: 'fallback',
+        retryable: true,
+        evidence: 'ERR_PNPM_NO_MATCHING_VERSION No matching version found for @acme/tool@1.2.3',
       })
     }
     if (payload.op === 'upgrade') {
@@ -313,7 +319,10 @@ test('行内安装失败时把错误留在页面上，且轮询的 setError(null
 
     tree = await panel.render()
     const text = textOf(tree)
+    // 回执标题现在带层次：「安装失败 · 版本解析层」，不再是笼统的一句"安装失败"。
+    // 用户第一眼要知道是哪一段坏了 —— 这是 txt 见解里最核心的一条。
     assert.match(text, /安装失败|Install failed/)
+    assert.match(text, /版本解析层|version resolution/, '标题要说明是哪一层：' + text.slice(0, 300))
     assert.match(text, /ERR_PNPM_NO_MATCHING_VERSION/)
     assert.match(text, /@acme\/tool@1\.2\.3/)
 

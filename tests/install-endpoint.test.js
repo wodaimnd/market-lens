@@ -198,7 +198,11 @@ describe('install endpoint：目录缺失时用快照补目标', () => {
     })
     fakeManager.throwText = null
     assert.equal(result.status, 500)
-    assert.equal(result.body.code, 'subdir-missing')
+    // code 现在是**原始码**（ERR_PNPM_INVALID_PATH），不再是自造的 subdir-missing：
+    // 前端按 layer + action 渲染，不再硬编码认几个特定字符串。
+    assert.equal(result.body.code, 'ERR_PNPM_INVALID_PATH')
+    assert.equal(result.body.layer, 'subdir')
+    assert.equal(result.body.action, 'copy-cmd')
     assert.match(result.body.error, /子目录在当前仓库中不存在/)
   })
 

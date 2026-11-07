@@ -329,6 +329,11 @@ window.__ModuleLoader__.load({
         noCache: '暂无本地缓存',
         emptyFiltered: '没有符合当前筛选条件的插件。',
         emptyCatalog: '目录为空，先同步一次。',
+        freshnessTitle: '部分来源不可用：',
+        freshnessRepeated: '（连续失败，本节结果可能缺少它那份条目）',
+        freshnessNever: '（从未成功拉取过）',
+        freshnessSyncing: '正在同步…',
+        freshnessRetry: '强制重试',
         page: '第',
         of: '页，共',
         pageSize: '每页',
@@ -494,10 +499,46 @@ window.__ModuleLoader__.load({
         installManualClipboardHint: '已复制，直接粘到官方安装框即可。',
         installNoticeClose: '关闭提示',
         installNoSpec: '这一行没有可用的安装目标，只能复制命令手动装。',
+        failLayerPrefix: '安装失败 · ',
+        failLayer_state: '目标已就位',
+        failLayer_resolve: '目标解析层',
+        failLayer_version: '版本解析层',
+        failLayer_subdir: '仓库子目录',
+        failLayer_compat: '运行时兼容性',
+        failLayer_declare: '插件声明',
+        failLayer_build: '构建脚本',
+        failLayer_workspace: 'pnpm 工作区',
+        failLayer_lock: '文件 / 锁定',
+        failLayer_permission: '权限',
+        failLayer_activation: '插件激活',
+        failLayer_inventory: '插件清单',
+        failLayer_unknown: '未归类',
+        actionRetry: '这是可自行恢复的瞬时错误，稍后点「重试」即可。',
+        actionApprove: '点「重试」会带上确认的构建脚本重新安装。',
+        actionReapprove: '待批准的构建脚本清单已经变了，点「重试」会重新获取最新清单。',
+        actionCopyCmd: '这条错误需要绕开本面板处理：点「复制安装命令」，关掉 DSH 后在终端执行。',
+        actionRestart: '这个插件当前仍在运行，需要先关闭 DSH 再操作。',
+        actionEdit: '安装目标写法不合法：支持 pkg、pkg@1.2.3、@scope/pkg、github:owner/repo、https://github.com/owner/repo。',
+        actionRefresh: '插件清单里找不到这个条目，先刷新再重试。',
+        actionDisable: '这个插件仍处于激活状态，先到官方「插件」页禁用它，再重试。',
+        actionChoose: '这个目标命中了多个已安装的包，需要先明确是哪一个。',
+        actionFallback: '目录里写的版本在 npm 上不存在，可以用最新版本重试。',
+        actionExemptGranted: '这条精确版本豁免已经生效；如果仍被拦，重启 DSH 让它重新读取 compatibility.json。',
+        actionExemptCanGrant: '宿主需要一条精确版本豁免（{key}）才肯放行。点「仍然安装并授豁免」会写入 profile 的 compatibility.json。',
+        actionExemptCannot: '这条豁免没法在这里授予（见下方原因）。',
+        installForce: '仍然安装并授豁免',
+        installForceHint: '写入精确版本豁免 {key} 后立即重试安装。插件与当前 DSH 版本不兼容，可能崩溃或丢数据。',
+        installForceGranted: '已授予豁免',
+        installForceRestart: '豁免已写入 profile 的 compatibility.json，但宿主可能要到重启 DSH 才重新读取。如果这次仍然被拦，请重启后再点一次安装。',
+        installForceFailed: '授予豁免失败',
+        installForceNoKey: '拿不到精确的 package@version，无法授予豁免；请复制安装命令后在命令行执行。',
+        installForceNoConsent: '宿主要求明确确认风险（acceptRisk），这次请求没有带上。',
         installNotMounted: '已装好，但没有挂载',
         installNotMountedHint: '文件已下载、也已写进依赖，但它没被加进 profile 的 bundle 列表，重启后不会自动加载。到官方「插件」页把这个包启用一次即可；运行日志里有一条 install.not-mounted 记录。',
         installHealthBad: '装好了，但加载不了',
         installHealthBadHint: '文件与挂载都正常，但插件自带的装载行解析不到：{rows}。这类故障 dsh 不会报错，表现就是重启后没有设置页、没有面板。请在「运行日志」页搜 install.health 看完整结论。',
+        installInactive: '装好了，但没激活',
+        installInactiveHint: '依赖、挂载、装载行都正常，但插件运行时状态是 {phase}，不是 active。这种情况重启后插件不会出现。请到官方「插件」页确认它已启用，仍不行就看运行日志里 install.health 的 activation 字段。',
         requirements: '兼容性证据',
         requirementKey: '要求',
         requirementRange: '范围',
@@ -567,9 +608,13 @@ window.__ModuleLoader__.load({
         actInstallHint: '一键安装到当前配置',
         actRetryHint: '上次操作失败；再点一次重试，失败原因在页首回执里。',
         actInstalling: '安装中…',
+        actReinstalling: '重装中…',
         actUpgrading: '升级中…',
         actInstalledAt: '已装版本',
         actRetry: '重试',
+        actUpdateHint: '装到新版本（不降级：装不到目标版本就算失败）',
+        actUpToDateHint: '已是最新；点了会重装同一个目标（幂等）',
+        actInstalledLocalHint: '本地 / link / GitHub 安装，没有 registry 版本可比，不能说「已是最新」',
         upgradeSucceeded: '升级完成',
         upgradeFailed: '升级失败',
         upgradeTo: '升级到',
@@ -771,6 +816,11 @@ window.__ModuleLoader__.load({
         noCache: 'No local cache yet',
         emptyFiltered: 'No plugins match the current filters.',
         emptyCatalog: 'The catalog is empty. Sync once first.',
+        freshnessTitle: 'Some sources are unavailable: ',
+        freshnessRepeated: ' (repeatedly failing — this view may be missing its entries)',
+        freshnessNever: ' (never fetched successfully)',
+        freshnessSyncing: 'Syncing…',
+        freshnessRetry: 'Force retry',
         page: 'Page',
         of: 'of',
         pageSize: 'Per page',
@@ -936,10 +986,46 @@ window.__ModuleLoader__.load({
         installManualClipboardHint: 'Copied — paste it into the official install box.',
         installNoticeClose: 'Dismiss',
         installNoSpec: 'This row has no install target; copy the command and install manually.',
+        failLayerPrefix: 'Install failed · ',
+        failLayer_state: 'target already in place',
+        failLayer_resolve: 'target resolution',
+        failLayer_version: 'version resolution',
+        failLayer_subdir: 'repository sub-directory',
+        failLayer_compat: 'runtime compatibility',
+        failLayer_declare: 'plugin declaration',
+        failLayer_build: 'build scripts',
+        failLayer_workspace: 'pnpm workspace',
+        failLayer_lock: 'file / lock',
+        failLayer_permission: 'permission',
+        failLayer_activation: 'plugin activation',
+        failLayer_inventory: 'plugin inventory',
+        failLayer_unknown: 'unclassified',
+        actionRetry: 'This is a transient error you can recover from — click Retry in a moment.',
+        actionApprove: 'Retry will install again with the approved build scripts.',
+        actionReapprove: 'The pending build list changed; Retry will fetch the current one.',
+        actionCopyCmd: 'This one needs to bypass this panel: copy the install command and run it in a terminal with DSH closed.',
+        actionRestart: 'This plugin is still running — close DSH first, then retry.',
+        actionEdit: 'The install target is malformed: use pkg, pkg@1.2.3, @scope/pkg, github:owner/repo, or https://github.com/owner/repo.',
+        actionRefresh: 'The plugin inventory does not list this entry; refresh, then retry.',
+        actionDisable: 'This plugin is still active — disable it from the official Plugins page, then retry.',
+        actionChoose: 'This target matched several installed packages; pick the one you meant.',
+        actionFallback: 'The catalog version is not on npm; retry with the latest instead.',
+        actionExemptGranted: 'This exact-version exemption is already active; if it is still refused, restart DSH so it re-reads compatibility.json.',
+        actionExemptCanGrant: 'The host needs an exact-version exemption ({key}) before it will allow this. Install anyway grants it by writing the profile compatibility.json.',
+        actionExemptCannot: 'This exemption cannot be granted here (see the reason below).',
+        installForce: 'Install anyway and grant exemption',
+        installForceHint: 'Writes the exact-version exemption for {key} and retries immediately. The plugin is incompatible with this DSH version and may crash or lose data.',
+        installForceGranted: 'Exemption granted',
+        installForceRestart: 'The exemption is written to the profile compatibility.json, but the host may only re-read it after a DSH restart. If this attempt is still refused, restart and install once more.',
+        installForceFailed: 'Granting the exemption failed',
+        installForceNoKey: 'No exact package@version could be derived, so no exemption can be granted; copy the install command and run it in a terminal.',
+        installForceNoConsent: 'The host requires explicit risk acknowledgement (acceptRisk); this request did not carry it.',
         installNotMounted: 'Installed, but not mounted',
         installNotMountedHint: 'The files are downloaded and the dependency is saved, but the package was not added to the profile bundle list, so it will not load after a restart. Enable it once from the official Plugins page; the runtime log has an install.not-mounted entry.',
         installHealthBad: 'Installed, but cannot load',
         installHealthBadHint: 'Files and mount are fine, but the bundle patch rows do not resolve: {rows}. dsh reports nothing for this — the symptom is a missing settings page or panel after a restart. Open the runtime log and search install.health for the full verdict.',
+        installInactive: 'Installed, but not activated',
+        installInactiveHint: 'Dependencies, mount and patch rows are all fine, but the runtime state is {phase}, not active — the plugin will not appear after a restart. Confirm it is enabled on the official Plugins page; if it still fails, check the activation field of install.health in the runtime log.',
         requirements: 'Compatibility evidence',
         requirementKey: 'Requirement',
         requirementRange: 'Range',
@@ -1004,9 +1090,13 @@ window.__ModuleLoader__.load({
         actInstallHint: 'Install into this profile',
         actRetryHint: 'The last attempt failed; click to retry. The reason is in the receipt at the top.',
         actInstalling: 'Installing…',
+        actReinstalling: 'Reinstalling…',
         actUpgrading: 'Upgrading…',
         actInstalledAt: 'Installed version',
         actRetry: 'Retry',
+        actUpdateHint: 'Install the new version (never falls back: not reaching the target counts as failure)',
+        actUpToDateHint: 'Already the latest; clicking reinstalls the same target (idempotent)',
+        actInstalledLocalHint: 'Installed from a local / link / GitHub source — there is no registry version to compare, so it cannot say "up to date"',
         upgradeSucceeded: 'Upgraded',
         upgradeFailed: 'Upgrade failed',
         upgradeTo: 'Upgrade to',
@@ -1818,14 +1908,29 @@ window.__ModuleLoader__.load({
       success: 'var(--dsw-alias-state-success-primary)',
     }
 
-    function InstallNotice({ notice, t, onClose, onRetry, onManual }) {
+    function InstallNotice({ notice, t, onClose, onRetry, onManual, onForce }) {
       if (!notice) return null
       const tone = NOTICE_TONE[notice.tone] || NOTICE_TONE.error
+      // detail 是「一行原始证据」，fullDetail 是完整 pnpm 输出。
+      // 两者都在时：行内只展示证据，完整文本挂在「复制错误详情」上 ——
+      // 否则一屏会被几十行 pnpm 进度刷满，而最有用的那行反而被挤到看不见。
+      const copyText = notice.fullDetail || notice.detail || null
+      // 兼容性拦截且**能授豁免**时，给一颗真的会动作的按钮。
+      // 没有这颗，「仍然安装」永远只是文案 —— 用户点了还是同一个错误。
+      const exemption = notice.exemption && notice.exemption.canGrant ? notice.exemption : null
       const buttons = h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
+        exemption && typeof onForce === 'function'
+          ? h('button', {
+            type: 'button',
+            style: buttonStyle(true, false, true),
+            title: t('installForceHint').replace('{key}', exemption.key || ''),
+            onClick: () => onForce(),
+          }, t('installForce'))
+          : null,
         notice.spec ? h(CopyButton, { text: notice.spec, label: t('installCopySpec'), copiedLabel: t('copied') }) : null,
-        notice.detail ? h(CopyButton, { text: notice.detail, label: t('installCopyError'), copiedLabel: t('copied') }) : null,
+        copyText ? h(CopyButton, { text: copyText, label: t('installCopyError'), copiedLabel: t('copied') }) : null,
         notice.retry && typeof onRetry === 'function'
-          ? h('button', { type: 'button', style: buttonStyle(true, false, true), onClick: () => onRetry() }, t('installRetry'))
+          ? h('button', { type: 'button', style: buttonStyle(!!exemption ? false : true, false, true), onClick: () => onRetry() }, t('installRetry'))
           : null,
         typeof onManual === 'function'
           ? h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => onManual() }, t('installManual'))
@@ -1921,8 +2026,17 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 把 Host 的安装失败转成一条可读提示。Host 会在 body 上带 code / spec / fellBackFrom，
-     * 分别对应「子目录不存在」「构建脚本待批准」「已经试过降级目标」三种可行动的情况。
+     * 把 Host 的安装失败转成一条可读提示。
+     *
+     * Host 现在下发的是**分层结论**，不再只是一句 pnpm 原文：
+     *   code     —— 原始码（宿主的 11 个 ManagementFailure 或 pnpm 的码）
+     *   layer    —— 哪一层坏了（resolve / compat / build / lock / workspace / …）
+     *   action   —— 该给哪颗按钮（retry / approve / reapprove / force / copy-cmd / restart / edit / refresh / choose / disable）
+     *   evidence —— 带错误码的那一行原文
+     *   retryable / incompatible
+     *
+     * 所以这里按 layer + action 渲染，而不是硬编码认 subdir-missing / file-busy 这几个码。
+     * 硬编码的后果是每加一个码都要改前端 —— 而宿主有 13 个码。
      */
     function noticeFromInstallError(cause, t, lang) {
       const body = (cause && cause.body) || {}
@@ -1932,6 +2046,12 @@ window.__ModuleLoader__.load({
         : (Array.isArray(body.pendingBuilds) ? body.pendingBuilds : [])
       const detail = (cause && cause.message) ? String(cause.message) : String(cause)
       const spec = body.spec || null
+      const layer = body.layer || null
+      const action = body.action || null
+      const evidence = body.evidence || null
+      const incompatible = Array.isArray(body.incompatible) ? body.incompatible : []
+
+      // 构建脚本待批准：这条有专属的「允许并重试」交互，优先级最高。
       if (code === 'build-approval-required' || pending.length) {
         return {
           tone: 'warn',
@@ -1944,19 +2064,96 @@ window.__ModuleLoader__.load({
           approvedBuilds: pending,
         }
       }
+
+      // 分层标题：用户第一眼要知道「哪一段坏了」，而不是只看一句"安装失败"。
+      const layerTitle = layer ? t('failLayerPrefix') + t('failLayer_' + layer) : t('installFailed')
+      const layerHint = hintForAction(action, body, t, lang)
+
       return {
-        tone: 'error',
-        title: t('installFailed'),
+        // state 层（已安装）不该走到这里 —— Host 会回 200。真走到这儿也按警告处理。
+        tone: layer === 'state' ? 'warn' : 'error',
+        title: layerTitle,
         subtitle: spec,
-        detail,
+        detail: evidence || detail,
+        fullDetail: detail,
         spec,
-        hint: code === 'subdir-missing'
-          ? t('installFallbackSubdir')
-          : (body.fellBackFrom ? (lang === 'zh'
-              ? '已先按目录版本、再按降级目标各试一次，仍然失败。'
-              : 'Tried both the catalog target and a fallback target; both failed.') : null),
-        retry: true,
+        code,
+        layer,
+        action,
+        incompatible,
+        evidence,
+        // 兼容性拦截要带出「真的能用的下一步」：宿主的 exact-version exemption。
+        // 没有它，「仍然安装」按钮就是个摆设 —— 点了还是同一个错误。
+        exemption: body.exemption || null,
+        hint: layerHint || (body.fellBackFrom
+          ? (lang === 'zh'
+            ? '已先按目录版本、再按降级目标各试一次，仍然失败。'
+            : 'Tried both the catalog target and a fallback target; both failed.')
+          : null),
+        retry: Boolean(body.retryable),
       }
+    }
+
+    /**
+     * action → 用户能读懂的一句话。
+     * action 是 Host 给的，前端只负责翻译；**不在这里判断该不该重试**。
+     */
+    function hintForAction(action, body, t, lang) {
+      const zh = lang === 'zh'
+      switch (action) {
+        case 'retry':
+          return t('actionRetry')
+        case 'approve':
+          return t('actionApprove')
+        case 'reapprove':
+          return t('actionReapprove')
+        case 'force': {
+          // 兼容性拦截：不只是把明细摊开，要给出**真的能用的**下一步。
+          // 宿主提供 exact-version exemption（写 profile 的 compatibility.json），
+          // 这里按 exemption 的状态说清"能授 / 已授 / 授不了"。
+          const names = incompatibleNames(body.incompatible, zh)
+          const exemption = body.exemption
+          if (!exemption) return names
+          if (exemption.granted) {
+            return (names ? names + ' · ' : '') + t('actionExemptGranted')
+          }
+          if (exemption.canGrant) {
+            return (names ? names + ' · ' : '') + t('actionExemptCanGrant').replace('{key}', exemption.key || '')
+          }
+          return (names ? names + ' · ' : '') + (exemption.reason || t('actionExemptCannot'))
+        }
+        case 'copy-cmd':
+          return t('actionCopyCmd')
+        case 'restart':
+          return t('actionRestart')
+        case 'edit':
+          return t('actionEdit')
+        case 'refresh':
+          return t('actionRefresh')
+        case 'disable':
+          return t('actionDisable')
+        case 'choose':
+          return t('actionChoose')
+        case 'fallback':
+          return t('actionFallback')
+        case 'none':
+          return null
+        default:
+          return null
+      }
+    }
+
+    /** incompatible 明细：把「哪个包要求了什么」摊开，别只给一个错误码。 */
+    function incompatibleNames(list, zh) {
+      if (!Array.isArray(list) || !list.length) return null
+      const parts = list.slice(0, 4).map((item) => {
+        const name = item && typeof item === 'object' ? (item.name || '?') : String(item)
+        const unmet = item && typeof item === 'object' && item.unmet && typeof item.unmet === 'object'
+          ? Object.entries(item.unmet).map(([key, range]) => key + ' ' + range).join(', ')
+          : ''
+        return name + (unmet ? '(' + unmet + ')' : '')
+      })
+      return (zh ? '与当前 DSH 不兼容：' : 'Incompatible with this DSH: ') + parts.join('; ')
     }
 
 
@@ -2720,11 +2917,43 @@ window.__ModuleLoader__.load({
       onInstall,
       actionBusy,
       installedKeys,
+      onSync,
     }) {
       const [openFilter, setOpenFilter] = useState(null)
       const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
       const safePage = Math.min(page, pageCount)
       const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize)
+
+      /**
+       * 空表必须区分三种情况 —— 它们对用户的下一步动作完全不同。
+       *
+       * 以前只有一句 `emptyFiltered`（"没有符合当前筛选条件的插件。"），
+       * 于是「目录还没同步过」和「筛得太狠」显示同一句话：前者要点同步，
+       * 后者要清筛选。用户照着错的那条做，怎么都出不来数据。
+       *
+       * `emptyCatalog` 这个 i18n key 早就写好了，只是一直没被引用。
+       *
+       * @returns {object} 空态节点
+       */
+      const emptyState = () => {
+        const total = Array.isArray(allRows) ? allRows.length : rows.length
+        const filteredOut = total > 0 && rows.length === 0
+        const copy = filteredOut ? t('emptyFiltered') : t('emptyCatalog')
+        const box = (extra) => h('div', {
+          style: { padding: '36px 20px', textAlign: 'center', ...style.muted },
+        }, copy, extra || null)
+        // 目录完全没有数据：直接把「去同步」摆在空态里，别让用户自己去工具栏找。
+        if (!filteredOut && typeof onSync === 'function') {
+          return box(h('div', { style: { marginTop: 10 } },
+            h('button', {
+              type: 'button',
+              style: buttonStyle(true, false, true),
+              onClick: (event) => { event.stopPropagation(); void onSync() },
+            }, t('sync')),
+          ))
+        }
+        return box(null)
+      }
 
       useEffect(() => {
         if (page !== safePage) setPage(safePage)
@@ -2785,19 +3014,23 @@ window.__ModuleLoader__.load({
           // 行本身的 onClick 会打开详情：按钮必须 stopPropagation，否则点安装等于点行。
           const rowKey = rowKeyOf(row)
           const busy = Boolean(actionBusy) && actionBusy.key === rowKey
-          // 状态只有一个来源：目录里的 row.installed / row.update。
+          // 状态只有一个来源：Host 下发的 row.button（见 lib/button-state.js）。
           // 前端乐观集合只用来「装完立刻变样」，一旦 Host 回的目录覆盖了它就以目录为准。
           const done = Boolean(row.installed) || (Boolean(installedKeys) && installedKeys.has(rowKey))
           const update = row.update && row.update.available ? row.update : null
-
-          if (!canInstallRow(row)) {
-            return h('span', { style: { ...style.muted, fontSize: 11 }, title: t('actManualHint') }, t('actManual'))
-          }
-          // status === 'error'：这次装/升级失败了。按钮回到可点状态，但把失败留在标题上，
+          // 失败优先：这次装/升级失败了，按钮回到可点状态并把失败留在标题上，
           // 点一次就能重试（页头另有完整回执与 pnpm 原文）。
           const failed = Boolean(actionBusy) && actionBusy.key === rowKey && actionBusy.status === 'error'
+          // Host 算好的状态；没有就退回一份保守推断（旧 Host 兼容）。
+          const button = row.button || null
+          const state = failed
+            ? 'retry'
+            : (button && button.state) || (done ? (update ? 'update' : 'installed-local') : (canInstallRow(row) ? 'install' : 'manual'))
+
           if (busy) {
-            const label = actionBusy.mode === 'upgrade' ? t('actUpgrading') : t('actInstalling')
+            const label = actionBusy.mode === 'upgrade'
+              ? t('actUpgrading')
+              : (actionBusy.mode === 'reinstall' ? t('actReinstalling') : t('actInstalling'))
             return h('button', {
               type: 'button',
               className: 'ml-row-install',
@@ -2806,35 +3039,73 @@ window.__ModuleLoader__.load({
               disabled: true,
             }, '…')
           }
-          if (done && update) {
-            // 已安装且有新版：按钮直接就是「更新 ↑ x.y.z」。
+
+          if (state === 'manual') {
+            return h('span', { style: { ...style.muted, fontSize: 11 }, title: t('actManualHint') }, t('actManual'))
+          }
+
+          // 六种稳定状态各有一份渲染。以前这里按 done/update 两个布尔拼，
+          // 于是「已是最新」这个状态永远上不了屏（installedUpToDate 那个 key 是死的）。
+          const mode = button && button.mode ? button.mode : (state === 'update' ? 'upgrade' : (state === 'install' ? 'install' : 'reinstall'))
+          const fire = (event) => { event.stopPropagation(); void onInstall(row, mode) }
+          const keyStop = (event) => event.stopPropagation()
+
+          if (state === 'update') {
+            const to = button && button.version ? button.version : (update ? update.to : null)
             return h('button', {
               type: 'button',
               className: 'ml-row-install',
-              title: updateBadgeTitle(update, t),
+              title: update ? updateBadgeTitle(update, t) : t('actUpdateHint'),
               style: { ...buttonStyle(true, false, true), padding: '2px 7px', whiteSpace: 'nowrap', fontFamily: MONO },
-              onClick: (event) => { event.stopPropagation(); void onInstall(row, 'upgrade') },
-              onKeyDown: (event) => event.stopPropagation(),
-            }, t('actUpdate') + ' ↑ ' + update.to)
+              onClick: fire,
+              onKeyDown: keyStop,
+            }, t('actUpdate') + ' ↑ ' + (to || ''))
           }
-          if (done) {
+
+          if (state === 'current') {
+            // 查过、确认没有新版。可点 —— 点了等于重装同一目标（幂等）。
             return h('button', {
               type: 'button',
               className: 'ml-row-install',
-              title: (row.installedVersion ? t('actInstalledAt') + ' ' + row.installedVersion : t('actInstalled')) + (failed ? '\n' + t('actRetryHint') : ''),
-              style: { ...buttonStyle(false, false, true), padding: '2px 8px', whiteSpace: 'nowrap', color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)', borderColor: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l1)' },
-              onClick: (event) => { event.stopPropagation(); void onInstall(row, 'reinstall') },
-              onKeyDown: (event) => event.stopPropagation(),
-            }, failed ? t('actRetry') : '✓ ' + t('actInstalled'))
+              title: (row.installedVersion ? t('actInstalledAt') + ' ' + row.installedVersion : t('actInstalled')) + '\n' + t('actUpToDateHint'),
+              style: { ...buttonStyle(false, false, true), padding: '2px 8px', whiteSpace: 'nowrap', color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-border-l1)' },
+              onClick: fire,
+              onKeyDown: keyStop,
+            }, '✓ ' + t('installedUpToDate'))
           }
+
+          if (state === 'installed-local') {
+            // 已装但是本地 / link / github —— **没有可比版本**，不能说「已是最新」。
+            return h('button', {
+              type: 'button',
+              className: 'ml-row-install',
+              title: (row.installedVersion ? t('actInstalledAt') + ' ' + row.installedVersion : t('actInstalled')) + '\n' + t('actInstalledLocalHint'),
+              style: { ...buttonStyle(false, false, true), padding: '2px 8px', whiteSpace: 'nowrap', color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-border-l1)' },
+              onClick: fire,
+              onKeyDown: keyStop,
+            }, '✓ ' + t('actInstalled'))
+          }
+
+          if (state === 'retry') {
+            return h('button', {
+              type: 'button',
+              className: 'ml-row-install',
+              title: t('actRetryHint'),
+              style: { ...buttonStyle(true, false, true), padding: '2px 8px', whiteSpace: 'nowrap', background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', borderColor: 'var(--dsw-alias-state-error-primary)' },
+              onClick: fire,
+              onKeyDown: keyStop,
+            }, t('actRetry'))
+          }
+
+          // install：未装且折得出目标。
           return h('button', {
             type: 'button',
             className: 'ml-row-install',
-            title: failed ? t('actRetryHint') : t('actInstallHint'),
-            style: { ...buttonStyle(true, false, true), padding: '2px 8px', whiteSpace: 'nowrap', ...(failed ? { background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', borderColor: 'var(--dsw-alias-state-error-primary)' } : {}) },
-            onClick: (event) => { event.stopPropagation(); void onInstall(row, 'install') },
-            onKeyDown: (event) => event.stopPropagation(),
-          }, failed ? t('actRetry') : t('actInstall'))
+            title: t('actInstallHint'),
+            style: { ...buttonStyle(true, false, true), padding: '2px 8px', whiteSpace: 'nowrap' },
+            onClick: fire,
+            onKeyDown: keyStop,
+          }, t('actInstall'))
         }
         if (column.key === 'name') {
           const change = CHANGE_META[row.change] || null
@@ -2927,7 +3198,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
               pageRows.length === 0
-                ? h('div', { style: { padding: '36px 20px', textAlign: 'center', ...style.muted } }, t('emptyFiltered'))
+                ? emptyState()
                 : pageRows.map((row) =>
                     h(
                       'div',
@@ -5192,6 +5463,54 @@ window.__ModuleLoader__.load({
       )
       const hiddenBySafeView = filtered.length - safeFiltered.length
 
+      /**
+       * 源级新鲜度状态带。
+       *
+       * 为什么必须在市场页出现：多源聚合下单个源失败不会报错，只是它那一份条目
+       * 少了一批。用户看到的是「这个插件搜不到」——结论错了，而原因在别处。
+       *
+       * 判定用的是 status.sourceHealth（后端已有 lastSuccessAt / failureCount / lastError）。
+       * 全部源都健康时不渲染任何东西 —— 状态带只在"有话说"时出现。
+       */
+      const freshnessBanner = (() => {
+        const healthEntries = Array.isArray(status?.sourceHealth) ? status.sourceHealth : []
+        if (!healthEntries.length) return null
+        // 只关心**启用且本次失败或从没成功过**的源。
+        const degraded = healthEntries.filter((entry) => {
+          if (!entry || entry.enabled === false) return false
+          if (entry.failureCount > 0) return true
+          return entry.lastSuccessAt === null || entry.lastSuccessAt === undefined
+        })
+        if (!degraded.length) return null
+        const syncing = Boolean(status?.sync?.running)
+        const tone = 'var(--dsw-alias-state-warn-primary)'
+        const names = degraded.slice(0, 4).map((entry) => entry.name || entry.id)
+        const more = degraded.length > 4 ? ' +' + (degraded.length - 4) : ''
+        return h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            padding: '6px 10px', borderRadius: 7, fontSize: 11.5, lineHeight: 1.5,
+            border: '1px solid ' + tone,
+            background: 'color-mix(in srgb, ' + tone + ' 9%, transparent)',
+            color: 'var(--dsw-alias-label-primary)',
+          },
+        },
+          h('span', { style: { color: tone, fontWeight: 600 } }, t('freshnessTitle')),
+          h('span', null, names.join(' · ') + more),
+          h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+            degraded.some((entry) => entry.failureCount > 0)
+              ? t('freshnessRepeated')
+              : t('freshnessNever')),
+          syncing ? h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, t('freshnessSyncing')) : null,
+          h('button', {
+            type: 'button',
+            style: buttonStyle(false, syncing, true),
+            disabled: syncing,
+            onClick: () => void startSync({ force: true }),
+          }, t('freshnessRetry')),
+        )
+      })()
+
       const sorted = useMemo(() => sortRows(safeFiltered, sort), [safeFiltered, sort])
 
       // 等目录真的进到表格里再滚回去：在空表上写 scrollTop 会被浏览器截成 0，
@@ -5289,10 +5608,16 @@ window.__ModuleLoader__.load({
           })
           return
         }
-        const upgradeTo = mode === 'upgrade' && row.update && row.update.to ? String(row.update.to) : null
+        // 目标版本以 Host 下发的 button.version 为准：它是算 buttonState 时
+        // 用的同一个值，不会出现「按钮写着 x.y.z，实际装的是另一个版本」。
+        const upgradeTo = mode === 'upgrade'
+          ? String(row.button?.version || (row.update && row.update.to) || '').trim() || null
+          : null
+        // reinstall 也要如实标注：它和首次安装走同一个 op，但语义不同 ——
+        // 原来这里被折叠成 'install'，日志里分不出「重装」与「首装」。
         setActionBusy({
           key: rowKey,
-          mode: upgradeTo ? 'upgrade' : 'install',
+          mode: upgradeTo ? 'upgrade' : (mode === 'reinstall' ? 'reinstall' : 'install'),
           status: 'pending',
           suffix: upgradeTo ? 'v' + upgradeTo : (row.pkg || null),
         })
@@ -5338,15 +5663,25 @@ window.__ModuleLoader__.load({
           // 「装上但不出现」，而在 dsh 自己的日志里一行都不提。这一类也要当场说。
           const health = body && body.health ? body.health : null
           const healthBad = Boolean(health && health.verdict === 'bad')
+          // 第四层：静态全通但运行时没激活（fiber failed / pending / 被禁用）。
+          // 这一类最像"什么都没发生"—— 重启后插件就是不出现，必须当场说。
+          const healthInactive = Boolean(health && (
+            health.verdict === 'installed-not-active' || health.verdict === 'installed-disabled'
+          ))
           const healthWarn = !mountWarn && Boolean(health && health.verdict === 'warn' && !health.unmounted)
           const healthDetail = health && Array.isArray(health.rows)
             ? health.rows.filter((row) => row.status === 'unresolved').map((row) => row.name)
             : []
+          const healthPhase = health && health.activation ? String(health.activation.phase) : null
           showNotice({
-            tone: mountWarn || healthBad ? 'warn' : 'success',
+            tone: mountWarn || healthBad || healthInactive ? 'warn' : 'success',
             title: mountWarn
               ? t('installNotMounted')
-              : (healthBad ? t('installHealthBad') : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded'))),
+              : (healthBad
+                ? t('installHealthBad')
+                : (healthInactive
+                  ? t('installInactive')
+                  : (upgradeTo ? t('upgradeSucceeded') : t('installSucceeded')))), 
             subtitle: row.pkg || row.title || row.name || null,
             detail: upgradeTo ? upgradeTo : null,
             spec: (body && body.spec) || null,
@@ -5354,7 +5689,9 @@ window.__ModuleLoader__.load({
               ? t('installNotMountedHint')
               : (healthBad
                 ? t('installHealthBadHint').replace('{rows}', healthDetail.join(', ') || (health && health.detail) || '?')
-                : (body && body.fellBackFrom ? t('installFallback') : null)),
+                : (healthInactive
+                  ? t('installInactiveHint').replace('{phase}', healthPhase || (health && health.detail) || '?')
+                  : (body && body.fellBackFrom ? t('installFallback') : null))),
             retry: false,
             row: null,
           })
@@ -5386,6 +5723,73 @@ window.__ModuleLoader__.load({
         }
         setActionBusy(null)
       }, [actionBusy, installApprovals, lang, loadStatus, loadCatalog, showNotice, t])
+      /**
+       * 「仍然安装」：先授精确版本豁免，再重试安装。
+       *
+       * 为什么必须分两步：宿主在 pnpm 装完后复核兼容性，检出
+       * incompatible-version 就整批回滚。豁免写在 profile 的 compatibility.json 里，
+       * **必须在下次安装之前就位**，否则重试还是同一个错误。
+       *
+       * 豁免的语法与限制全部由 Host 的 exempt.grant 校验（精确版本、当前运行时、
+       * acceptRisk）。这里只负责把「用户明确点了仍然安装」翻译成 acceptRisk: true ——
+       * 那一下点击就是明确同意。
+       */
+      const grantAndRetry = useCallback(async () => {
+        const current = notice
+        const exemption = current && current.exemption ? current.exemption : null
+        if (!exemption || !exemption.key) {
+          showNotice({
+            tone: 'error',
+            title: t('installForceFailed'),
+            subtitle: null,
+            detail: t('installForceNoKey'),
+            hint: null,
+            retry: false,
+            row: null,
+          })
+          return
+        }
+        const split = exemption.key.lastIndexOf('@')
+        const pkg = exemption.key.slice(0, split)
+        const version = exemption.key.slice(split + 1)
+        const target = current.row || null
+        try {
+          const granted = await request({
+            op: 'exempt.grant',
+            pkg,
+            version,
+            acceptRisk: true,
+          })
+          showNotice({
+            tone: 'success',
+            title: t('installForceGranted'),
+            subtitle: exemption.key,
+            detail: null,
+            spec: current.spec || null,
+            hint: granted && granted.restartRequired ? t('installForceRestart') : null,
+            retry: false,
+            row: null,
+          })
+          // 豁免写完立刻重试这一次安装。宿主可能要到重启才重新读 compatibility.json，
+          // 所以重试仍然可能被拦 —— 那时回执里会显示「已授豁免，重启后再试」。
+          if (target) void installRow(target, 'reinstall')
+          else await Promise.all([loadStatus().catch(() => {}), loadCatalog().catch(() => {})])
+        } catch (cause) {
+          const body = (cause && cause.body) || {}
+          showNotice({
+            tone: 'error',
+            title: t('installForceFailed'),
+            subtitle: exemption.key,
+            detail: (body.error || (cause && cause.message) || '').toString(),
+            fullDetail: null,
+            spec: current.spec || null,
+            hint: body.needsConsent ? t('installForceNoConsent') : null,
+            retry: false,
+            row: null,
+          })
+        }
+      }, [notice, request, t, installRow, loadStatus, loadCatalog, showNotice])
+
 
       const startSync = async ({ force } = {}) => {
         setSyncing(true)
@@ -5730,6 +6134,12 @@ window.__ModuleLoader__.load({
             onRetry: notice && notice.row
               ? () => { const target = notice.row; showNotice(null); void installRow(target) }
               : null,
+            // 「仍然安装」：先授精确版本豁免，再带着它重试。
+            // 豁免是宿主 compatibility.json 里的东西，写入后可能要到重启才被重新读取，
+            // 所以成功后要明确提示这一点（Host 的响应里带 restartRequired）。
+            onForce: notice && notice.exemption && notice.exemption.canGrant
+              ? () => { void grantAndRetry() }
+              : null,
             onManual: notice
               ? () => setManual({
                   spec: notice.spec || (notice.row ? (installTargetForRow(notice.row) || '') : ''),
@@ -5888,6 +6298,11 @@ window.__ModuleLoader__.load({
                         }),
                         h('button', { type: 'button', style: buttonStyle(false, activeCount === 0, true), onClick: clearFilters, disabled: activeCount === 0 }, t('clearFilters') + (activeCount ? ' (' + activeCount + ')' : '')),
                       ),
+                      // 源级新鲜度：多源聚合下，某个源挂了会让它的条目「凭空消失」，
+                      // 用户看到的就是「这个插件没有」，而其实是「源没拉到」。
+                      // 数据一直在 status.sourceHealth 里，只是从没上过市场页 ——
+                      // 以前只在「来源」页能看到，而用户排查"搜不到"时不会去那儿。
+                      freshnessBanner,
                       // 安全视图藏了东西就必须说清楚藏了多少，否则用户会以为目录缺条目
                       safeView && hiddenBySafeView > 0
                         ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)' } },
@@ -5941,6 +6356,7 @@ window.__ModuleLoader__.load({
                         onInstall: installRow,
                         actionBusy,
                         installedKeys,
+                        onSync: () => startSync({ force: false }),
                       }),
                       enabledSourceNames.length
                         ? h('div', { style: { ...style.muted, fontSize: 11.5, lineHeight: 1.6 } },

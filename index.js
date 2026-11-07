@@ -50,6 +50,19 @@ import {
 } from './lib/runtime.js'
 import { fetchJson, pickText, sleep } from './lib/util.js'
 import { inspectInstalledHealth, parsePatchRows, classifyRowName } from './lib/health.js'
+import { FAILURE_LAYERS, classifyInstallFailure, isAlreadyPresent } from './lib/install-codes.js'
+import { buttonInfoFor, buttonStateOf, BUTTON_STATES } from './lib/button-state.js'
+import {
+  catalogStaleness,
+  conditionalOf,
+  confirmFetched,
+  confirmNotModified,
+  normalizeSourceCache,
+  recordFailure,
+  stalenessOf,
+} from './lib/source-cache.js'
+import { activationOf, collectActivation, mergeActivation } from './lib/activation.js'
+import { COMPATIBILITY_FILE, EXEMPT_RESULT, grantExemption, hasExemption, readCompatibility } from './lib/exempt.js'
 import { OpLog } from './lib/op-log.js'
 import {
   BUILT_IN_PRESETS,
@@ -190,6 +203,14 @@ const versionText = (value) => (typeof value === 'string' ? value : JSON.stringi
 // 同时只允许一个安装任务：pnpm 会改同一个 profile 的 manifest 与 lockfile，
 // 并发安装互相覆盖，这里用 spec 记录谁在装，也用于给前端回显。
 let installingKey = null
+
+/**
+ * 上一次安装失败的 key 集合（内存，不落盘）。
+ * 存在的理由：client 的 actionBusy 只在当前页面活，目录一刷新就丢了；
+ * 而「这一行刚刚装失败过」应当跟着行本身 —— 否则刷新后按钮又变回「装」，
+ * 用户以为上次成功了。重启后清空是对的（重启意味着重新开始）。
+ */
+const installFailures = new Set()
 
 /**
  * 从 `dsh plugin ... add <spec>` 安装命令里提取可安装目标。
@@ -499,6 +520,11 @@ function publicRow(row) {
     riskFlags: row.riskFlags ?? [],
     license: row.license ?? null,
     installable: Boolean(row.installable),
+    // 按钮状态的唯一来源（见 lib/button-state.js）。client 只渲染，不再自己推：
+    // 装 / 更新 / 已是最新 / 已装（本地）/ 重试 / 复制命令 六种语义只在这一处实现。
+    button: row.button || null,
+    // 已装时那个包在 profile 里的 spec —— 用来判「查过没有新版」还是「根本没法比」
+    installedSpec: row.installedSpec ?? null,
     // 本次同步差异：added / updated / removed（下架），null 表示没有变化
     change: row.change || null,
     changeDetail: row.changeDetail || null,
@@ -599,6 +625,13 @@ export function apply(ctx) {
   const logger = ctx.logger ?? console
 
   let sourceConfig = loadSourceConfig()
+  // 逐源条件请求记录（ETag / lastModified / lastConfirmedAt）。
+  // 落在 source-config.json 里而不是 catalog.json：它描述的是"源的状态"，
+  // 不是"目录的内容"，跟着配置走才不会被 clearCatalog 顺手清掉。
+  let sourceCaches = typeof sourceConfig.sourceCaches === 'object' && sourceConfig.sourceCaches
+    ? sourceConfig.sourceCaches
+    : {}
+  let cacheDirty = false
   let rows = []
   let rowIndex = new Map()
   let meta = {}
@@ -852,8 +885,11 @@ export function apply(ctx) {
   }
 
   /**
-   * 装完之后的落地体检（见 lib/health.js）。这里只补上下文：profile 目录、
-   * 当前 bundles、运行时版本，然后交给纯函数判定，便于单测直接覆盖。
+   * 装完之后的落地体检（见 lib/health.js + lib/activation.js）。
+   *
+   * 前三层是静态的（依赖 / 挂载 / 装载行），第四层是**运行时**的：
+   * Cordis 给每个入口建一个 Fiber，只有 active 才算真的挂上了。
+   * 三层全对但 fiber failed，表现就是用户说的「装了但不出现」。
    */
   function installedHealth(packageName, spec) {
     let bundles = []
@@ -863,13 +899,55 @@ export function apply(ctx) {
     } catch {
       // profile 读不到时按空列表判定：不会误判成「已挂载」
     }
-    return inspectInstalledHealth({
+    const staticHealth = inspectInstalledHealth({
       profileDir,
       packageName,
       bundles,
       runtimeVersion: runtime?.runtimeVersion ?? runtime?.appVersion ?? null,
       spec: spec ?? null,
     })
+
+    // ---- 第四层：运行时激活状态 ----
+    //
+    // ctx.loader 不是公开 API，但它就是宿主自己读的那个东西
+    // （dsh-host-plugin-inventory 也是 `for (const entry of ctx.loader.entries())`）。
+    // 拿不到就退回静态结论：不可知 ≠ 没激活。
+    const activation = activationOf(packageName, liveActivation())
+    const merged = mergeActivation({
+      staticVerdict: staticHealth.verdict,
+      activation,
+      mounted: Boolean(staticHealth.mounted),
+    })
+
+    return {
+      ...staticHealth,
+      // verdict 现在是四层合成结论：
+      //   activated / installed-disabled / installed-not-active / ok / warn / bad / skipped
+      verdict: merged.verdict,
+      staticVerdict: staticHealth.verdict,
+      activation: activation.available ? activation : null,
+      detail: merged.detail ?? staticHealth.detail,
+    }
+  }
+
+  /**
+   * 读当前 Loader 里每个入口的 Fiber 状态。
+   *
+   * 每次都重新读（不缓存）：Fiber 状态是活的，装完之后下一秒可能就从
+   * pending 变 active。缓存只会给出过期结论。
+   *
+   * @returns {Map<string, {phase: string|null, entryId: string|null, disabled: boolean}>}
+   */
+  function liveActivation() {
+    const loader = ctx.loader
+    if (!loader || typeof loader.entries !== 'function') return new Map()
+    try {
+      return collectActivation(loader.entries())
+    } catch (error) {
+      // loader 正在重组时 entries() 可能抛：这不是插件的问题，当成不可知
+      logger?.debug?.('[market-lens] loader.entries() failed: ' + message(error))
+      return new Map()
+    }
   }
 
   /**
@@ -1060,9 +1138,13 @@ export function apply(ctx) {
 
   // 写盘结果必须往上传：调用方据此回 ok:false，不能让用户以为设置已保存
   function saveConfig() {
+    // 条件请求记录跟着配置一起落盘：它描述的是「源的状态」而不是「目录的内容」，
+    // 所以 clearCatalog 清缓存时不该顺手把它清掉。
+    sourceConfig.sourceCaches = sourceCaches
     const result = saveSourceConfig(sourceConfig)
     if (result.ok) {
       healthDirty = false
+      cacheDirty = false
       return result
     }
     logger.warn?.('[market-lens] failed to save source config: ' + result.error)
@@ -1096,11 +1178,17 @@ export function apply(ctx) {
     entry.failureCount += 1
     entry.lastError = truncate(text, 200)
     healthDirty = true
+    // 条件请求记录也要记失败 —— 但**绝不推进 lastConfirmedAt**。
+    // 这是整个 ETag 设计的硬约束：失败不能让目录看起来更新。
+    sourceCaches[sourceId] = recordFailure(sourceCaches[sourceId], Date.now())
+    cacheDirty = true
   }
 
   function flushSourceHealth() {
-    if (!healthDirty) return
+    if (!healthDirty && !cacheDirty) return
     saveConfig()
+    healthDirty = false
+    cacheDirty = false
   }
 
   function loadCatalogCache() {
@@ -1348,7 +1436,97 @@ export function apply(ctx) {
       const entry = row.pkg ? installed.get(row.pkg.toLowerCase()) : null
       row.installed = Boolean(entry)
       row.installedVersion = entry?.version ?? null
+      // spec 一起存下来：buttonStateOf 用它区分「registry 上查过没有新版」
+      // 与「本地/link 根本没法比」。
+      row.installedSpec = entry?.spec ?? null
     }
+    refreshButtonStates()
+  }
+
+  /**
+   * 兼容性拦截的「下一步」信息。
+   *
+   * 宿主在 pnpm 装完后会复核兼容性，检出 incompatible-version 就整批回滚。
+   * 它的输出里其实给了出路（`dsh plugin allow-version` / 插件管理器），
+   * 但 market-lens 没把它接上 —— 于是「仍然安装」按钮点了还是同一个错误。
+   *
+   * 这里只做**只读**判定：这条 spec 折得出 key 吗、当前运行时是什么、
+   * 是否已经有豁免。真正授予豁免是单独的 op，需要用户显式确认。
+   *
+   * @param {string|null} spec `pkg@version`
+   * @returns {{key: string|null, runtimeVersion: string|null, granted: boolean, canGrant: boolean, reason: string|null, compatibilityFile: string}}
+   */
+  function incompatibleVerdict(spec) {
+    const name = packageNameFromSpec(spec)
+    const version = typeof spec === 'string' && spec.includes('@', spec.startsWith('@') ? 2 : 0)
+      ? spec.slice(spec.lastIndexOf('@') + 1).trim()
+      : ''
+    // 自己取一次运行时信息，不依赖外层闭包变量：
+    // 这个函数在 install 的 catch 里被调用，而 catch 的执行时机跨了多个
+    // 请求/测试上下文；直接读 getRuntimeInfo()（它自己有缓存）比读闭包更稳。
+    const info = getRuntimeInfo()
+    const runtimeVersion = info?.runtimeVersion ?? info?.appVersion ?? null
+    const base = {
+      key: null,
+      runtimeVersion,
+      granted: false,
+      canGrant: false,
+      reason: null,
+      compatibilityFile: COMPATIBILITY_FILE,
+    }
+    if (!name || !version) {
+      return { ...base, reason: '折不出精确的 package@version，无法授予豁免；请复制安装命令后手工执行' }
+    }
+    const key = name + '@' + version
+    if (!runtimeVersion) {
+      return { ...base, key, reason: '拿不到当前 DSH 的精确版本号，无法授予豁免' }
+    }
+    // 文件坏了就不能写：改写了会冲掉用户原有内容
+    const current = readCompatibility(profileDir)
+    if (!current.rewritable) {
+      return { ...base, key, reason: COMPATIBILITY_FILE + ' 无法安全改写，请先手工修复：' + current.warnings.join('；') }
+    }
+    const granted = hasExemption(profileDir, name, version, runtimeVersion)
+    return {
+      ...base,
+      key,
+      granted,
+      canGrant: !granted,
+      reason: granted
+        ? '这条精确版本豁免已经生效；如果仍然被拦，重启 DSH 让它重新读取 ' + COMPATIBILITY_FILE
+        : null,
+    }
+  }
+
+  /**
+   * 重算整表按钮状态。目录/已装集合/更新结论三者任意一个变了都要重跑，
+   * 否则按钮会停在过期状态（真机上见过「升级完了按钮还是 ↑ x.y.z」）。
+   */
+  function refreshButtonStates() {
+    for (const row of rows) {
+      row.button = buttonInfoFor({
+        installed: row.installed,
+        installedVersion: row.installedVersion,
+        installedSpec: row.installedSpec,
+        pkg: row.pkg,
+        repo: row.repo,
+        update: row.update,
+      }, { failed: Boolean(row.key && installFailures.has(row.key)) })
+    }
+  }
+
+  /**
+   * 这一行的上一次安装失败了。
+   *
+   * 存在内存里，不写缓存：失败是一次尝试的结果，不是目录的属性。
+   * 重启后按钮回到正常状态是**对的** —— 用户重启本来就意味着"重新开始"。
+   * 装在 Host 侧而不是只留 client 的 actionBusy，是为了让失败在目录刷新后仍然可见。
+   */
+  function markInstallFailure(key, failed) {
+    if (typeof key !== 'string' || !key) return
+    if (failed) installFailures.add(key)
+    else installFailures.delete(key)
+    refreshButtonStates()
   }
 
   /**
@@ -1510,6 +1688,9 @@ export function apply(ctx) {
 
   function refreshUpdateOnRows() {
     for (const row of rows) row.update = updateEntryFor(row)
+    // 更新结论变了，按钮就必须跟着变 —— 否则「升级到最新」之后
+    // 按钮还停在「更新 ↑ x.y.z」，「已是最新」这个状态永远上不了屏。
+    refreshButtonStates()
   }
 
   function computeSourceCounts() {
@@ -1556,6 +1737,8 @@ export function apply(ctx) {
     return sourceConfig.sources.map((source) => {
       const progress = syncState.progress[source.id]
       const health = sourceHealthEntry(source.id)
+      const cache = normalizeSourceCache(sourceCaches[source.id])
+      const stale = stalenessOf(sourceCaches[source.id])
       return {
         ...source,
         rows: sourceCounts[source.id] ?? 0,
@@ -1565,6 +1748,13 @@ export function apply(ctx) {
         lastSuccessAt: health.lastSuccessAt,
         failureCount: health.failureCount,
         lastError: health.lastError,
+        // 条件请求的结论：只有 304 才推进 lastConfirmedAt，
+        // 所以这个字段能如实回答「这份数据到底确认于何时」。
+        lastConfirmedAt: cache.lastConfirmedAt,
+        hasConditionalMarker: Boolean(cache.etag || cache.lastModified),
+        stale: stale.stale,
+        staleReason: stale.reason,
+        staleAgeMs: stale.ageMs,
       }
     })
   }
@@ -1598,6 +1788,11 @@ export function apply(ctx) {
       profile: { name: profileName, dir: profileDir },
       rows: rows.length,
       cache: { exists: cacheExists, generatedAt: cacheGeneratedAt, path: cachePath },
+      // 整份目录的「确认」结论：只有 304 才推进 lastConfirmedAt，
+      // 所以这里能如实回答「这份目录到底是新拉的还是沿用的」。
+      cacheStaleness: catalogStaleness(sourceCaches, {
+        enabled: enabledSources(sourceConfig).map((source) => source.id),
+      }),
       sync: syncState,
       compat: compat.status(),
       counts: countRows(rows),
@@ -1697,6 +1892,9 @@ export function apply(ctx) {
 
     let result
     let items
+    // 条件请求：只有单文档源能这么问（分页目录每页的 ETag 各不相同，
+    // 用它判"整份目录没变"是错的）。拿不到标记就发普通请求 —— 不是错误。
+    const conditional = conditionalOf(sourceCaches[source.id])
     if (source.kind === '1024store') {
       result = await fetch1024Catalog({
         signal,
@@ -1706,13 +1904,13 @@ export function apply(ctx) {
       })
       items = result.items.map((item) => normalize1024(item, profileName)).filter(Boolean)
     } else if (source.kind === 'dshfind') {
-      result = await fetchFormat1Index(CATALOG_DSHFIND_ENDPOINT, { signal, onProgress: (value) => progress({ ...value, message: '正在拉取 dshfind 索引' }) })
-      items = result.items
+      result = await fetchFormat1Index(CATALOG_DSHFIND_ENDPOINT, { signal, conditional, onProgress: (value) => progress({ ...value, message: '正在拉取 dshfind 索引' }) })
+      items = result.notModified ? null : result.items
         .map((item) => normalizeFormat1(item, { sourceId: source.id, sourceName: source.name, sourceHomepage: 'https://dshfind.com', profileName }))
         .filter(Boolean)
     } else if (source.kind === 'dshso') {
-      result = await fetchFormat1Index(source.url || CATALOG_DSHSO_ENDPOINT, { signal, onProgress: (value) => progress({ ...value, message: '正在拉取 dsh.so 精选市场' }) })
-      items = result.items
+      result = await fetchFormat1Index(source.url || CATALOG_DSHSO_ENDPOINT, { signal, conditional, onProgress: (value) => progress({ ...value, message: '正在拉取 dsh.so 精选市场' }) })
+      items = result.notModified ? null : result.items
         .map((item) => normalizeFormat1(item, { sourceId: source.id, sourceName: source.name, sourceHomepage: 'https://www.dsh.so', profileName }))
         .filter(Boolean)
     } else if (source.kind === 'dshmarketplace') {
@@ -1732,8 +1930,8 @@ export function apply(ctx) {
         .map((item) => normalizeStandardItem(item, { sourceId: source.id, sourceName: source.name, profileName }))
         .filter(Boolean)
     } else if (source.kind === 'format1') {
-      result = await fetchFormat1Index(source.url, { signal, onProgress: (value) => progress({ ...value, message: `正在拉取 ${source.name}` }) })
-      items = result.items
+      result = await fetchFormat1Index(source.url, { signal, conditional, onProgress: (value) => progress({ ...value, message: `正在拉取 ${source.name}` }) })
+      items = result.notModified ? null : result.items
         .map((item) => normalizeFormat1(item, { sourceId: source.id, sourceName: source.name, sourceHomepage: source.name, profileName }))
         .filter(Boolean)
     } else {
@@ -1742,6 +1940,30 @@ export function apply(ctx) {
 
     // 已中止的源不能再回写成功状态：否则超时后界面会把 error 翻回 done，健康状态也会被误记成功
     if (signal.aborted) throw signal.reason ?? new Error('sync cancelled')
+
+    // ---- 304 分支：内容没变，绝不能重写快照 ----
+    //
+    // 这里必须**早于** markSourceSuccess 的处理逻辑：
+    // 304 是「确认最新」，要推进 lastConfirmedAt，但 items 为 null，
+    // 上游必须知道这一源本轮没有新数据（否则会把它的条目当成"下架"）。
+    if (result.notModified) {
+      sourceCaches[source.id] = confirmNotModified(sourceCaches[source.id], result, Date.now())
+      cacheDirty = true
+      // 逐源健康时间也要推进（用户看到的是"上次成功多久前"）
+      markSourceSuccess(source.id)
+      syncState.progress[source.id] = { status: 'done', done: 0, total: 0, error: null, notModified: true }
+      return {
+        source,
+        items: null,
+        notModified: true,
+        meta: { ...result.meta, rows: null, kind: source.kind, name: source.name, notModified: true },
+      }
+    }
+
+    // ---- 200 分支：内容变了，更新标记 ----
+    sourceCaches[source.id] = confirmFetched(sourceCaches[source.id], result, Date.now())
+    cacheDirty = true
+
     syncState.progress[source.id] = {
       status: 'done',
       done: items.length,
@@ -1753,6 +1975,7 @@ export function apply(ctx) {
     return {
       source,
       items,
+      notModified: false,
       meta: { ...result.meta, rows: items.length, kind: source.kind, name: source.name },
     }
   }
@@ -1826,7 +2049,34 @@ export function apply(ctx) {
 
       if (signal.aborted && !syncTimedOut) throw signal.reason ?? new Error('sync cancelled')
       const successful = results.filter(Boolean)
-      const sourceRows = successful.flatMap((result) => result.items)
+      // 上一份目录要在 build 之前就留住：304 的源需要从它里面捞回自己的行。
+      const previousRowsSnapshot = rows
+      const previousGeneratedAt = cacheGeneratedAt
+      // ---- 304 的源要复用上一轮条目，绝不能当成"下架" ----
+      //
+      // 这是整个条件请求设计里最容易写错的一处：
+      // `notModified` 的 result 里 items 是 null（服务端根本没发 body）。
+      // 如果直接 flatMap，那个源的条目会整体消失 → diffRows 会把它判成「下架」，
+      // 用户看到的是「一大批插件被下架了」，而其实只是"没变化"。
+      //
+      // 所以：notModified 的源，从**上一份目录**里捞回属于它的行，原样放进本轮。
+      const notModifiedSources = successful.filter((result) => result.notModified).map((result) => result.source.id)
+      const freshSources = new Set(successful.filter((result) => !result.notModified).map((result) => result.source.id))
+      const carriedRows = notModifiedSources.length && Array.isArray(previousRowsSnapshot)
+        ? previousRowsSnapshot.filter((row) => {
+            const sources = Array.isArray(row.sources) ? row.sources : []
+            if (!sources.length) return false
+            // 一行可能来自多个源：只要它还有**本轮真拿到数据**的源支撑，
+            // 就不该由 304 的源"续命"——它的内容应当由真拉到的那一份决定。
+            if (sources.some((id) => freshSources.has(id))) return false
+            return sources.some((id) => notModifiedSources.includes(id))
+          })
+        : []
+
+      const sourceRows = [
+        ...successful.filter((result) => !result.notModified).flatMap((result) => (Array.isArray(result.items) ? result.items : [])),
+        ...carriedRows,
+      ]
       if (sourceRows.length === 0) throw new Error('所有启用的市场源都没有返回数据')
 
       syncState.phase = 'build'
@@ -1842,9 +2092,10 @@ export function apply(ctx) {
       })
       // 差异必须拿「上一份目录」对「这一份目录」算，且下架判定只信本轮成功的来源：
       // 某个源超时/报错时它的条目会凭空消失，那不能算别人下架。
-      const previousRows = rows
-      const previousGeneratedAt = cacheGeneratedAt
+      const previousRows = previousRowsSnapshot
       const diffed = diffRows(previousRows, built, {
+        // 304 的源也算"本轮成功"：它的内容没变，不是失败，
+        // 所以它支撑的行同样不该被判成下架。
         syncedSources: successful.map((result) => result.source.id),
         previousGeneratedAt,
         now: new Date().toISOString(),
@@ -1855,7 +2106,13 @@ export function apply(ctx) {
       cacheGeneratedAt = new Date().toISOString()
       cacheExists = true
       const nextSourceCounts = {}
-      for (const result of successful) nextSourceCounts[result.source.id] = result.items.length
+      for (const result of successful) {
+        // 304 的源没有本轮条目数：沿用上一轮记下的数字，不要写成 0
+        // （写 0 会让界面上那个源显示"0 条"，看起来它整批被清空了）。
+        nextSourceCounts[result.source.id] = result.notModified
+          ? (sourceCounts[result.source.id] ?? carriedRows.filter((row) => (row.sources || []).includes(result.source.id)).length)
+          : (Array.isArray(result.items) ? result.items.length : 0)
+      }
       sourceCounts = nextSourceCounts
       meta = {
         generatedAt: cacheGeneratedAt,
@@ -2233,6 +2490,80 @@ export function apply(ctx) {
         return sendJson(res, 200, { ok: true, ...compat.delta(Number(body.since) || 0) })
       }
 
+      /**
+       * 授予 / 撤销一条精确版本豁免（宿主 compatibility.json）。
+       *
+       * 这是「仍然安装」那条路的**实际执行步骤**。宿主在 pnpm 装完后复核兼容性，
+       * 检出 incompatible-version 就整批回滚；它的报错里写着
+       * `dsh plugin allow-version`，但 market-lens 原来没把它接到界面上。
+       *
+       * 几条必须由调用方满足的条件（缺一个就拒绝，并说清缺哪个）：
+       *   · pkg 与 version 都必须是精确的（范围 / 标签 / latest 都不行）
+       *   · runtimeVersion 必须是**当前**这个 DSH 的版本（宿主拒绝批准别的版本）
+       *   · acceptRisk 必须显式为 true（宿主同样要求明确承认风险）
+       *   · compatibility.json 坏掉时不许改写（会冲掉用户原有内容）
+       */
+      if (op === 'exempt.grant' || op === 'exempt.revoke') {
+        const pkg = typeof body.pkg === 'string' ? body.pkg.trim() : ''
+        const version = exactVersion(body.version)
+        const runtimeVersion = runtime?.runtimeVersion ?? runtime?.appVersion ?? null
+        const grant = op === 'exempt.grant'
+        if (!pkg || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(pkg)) {
+          opLog.warn('exempt.invalid-pkg', { pkg: body.pkg ?? null })
+          return sendJson(res, 400, { ok: false, error: '豁免目标必须是合法的 npm 包名' })
+        }
+        if (!version) {
+          opLog.warn('exempt.invalid-version', { version: body.version ?? null })
+          return sendJson(res, 400, { ok: false, error: '豁免版本必须是精确版本号（如 0.4.7）：范围与标签都不接受' })
+        }
+        if (grant && body.acceptRisk !== true) {
+          // 不弹二次确认就授予豁免，等于替用户按下"我接受数据丢失风险"
+          opLog.warn('exempt.needs-consent', { pkg, version })
+          return sendJson(res, 400, {
+            ok: false,
+            error: '授予豁免需要显式确认风险：请求里带 acceptRisk: true',
+            needsConsent: true,
+          })
+        }
+        const outcome = grant
+          ? grantExemption({ profileDir, pkg, version, runtimeVersion, acceptRisk: body.acceptRisk === true, dryRun: body.dryRun === true })
+          : revokeExemption({ profileDir, pkg, version, runtimeVersion, dryRun: body.dryRun === true })
+        const code = outcome.result
+        opLog.write(code === EXEMPT_RESULT.ok || code === EXEMPT_RESULT.alreadyGranted ? 'info' : 'warn', 'exempt.' + (grant ? 'grant' : 'revoke'), {
+          pkg,
+          version,
+          runtimeVersion: runtimeVersion ?? null,
+          result: code,
+          detail: outcome.detail,
+        })
+        if (code === EXEMPT_RESULT.ok || code === EXEMPT_RESULT.alreadyGranted) {
+          return sendJson(res, 200, {
+            ok: true,
+            result: code,
+            pkg,
+            version,
+            runtimeVersion,
+            exemptions: outcome.exemptions,
+            warnings: outcome.warnings || [],
+            detail: outcome.detail,
+            // 豁免写在 profile 目录里，宿主可能要到重启才重新读
+            restartRequired: grant && code === EXEMPT_RESULT.ok,
+            compatibilityFile: COMPATIBILITY_FILE,
+          })
+        }
+        return sendJson(res, 500, {
+          ok: false,
+          result: code,
+          pkg,
+          version,
+          runtimeVersion,
+          exemptions: outcome.exemptions || {},
+          warnings: outcome.warnings || [],
+          error: outcome.detail || '豁免未生效',
+          compatibilityFile: COMPATIBILITY_FILE,
+        })
+      }
+
       if (op === 'install') {
         logInstall('info', 'install.request', { key: body.key || body.id || null, spec: body.spec || null, hasTarget: Boolean(body.target), approved: Array.isArray(body.approvedBuilds) ? body.approvedBuilds.length : 0 })
         const key = String(body.key || body.id || '')
@@ -2279,6 +2610,8 @@ export function apply(ctx) {
           ? body.approvedBuilds.filter((name) => typeof name === 'string' && name.length > 0 && name.length <= 214).slice(0, 32)
           : []
         installingKey = spec
+        // 开始尝试：先清掉上一轮失败标记，按钮立刻回到「安装中…」的语义基础。
+        markInstallFailure(row?.key || key || '', false)
         const startedAt = Date.now()
         // 目录里的版本号来自第三方市场，可能已经过期（甚至根本不存在于 npm），
         // 所以第一次失败后按 pnpm 的具体报错尝试一次降级目标：pkg@x.y.z → pkg、
@@ -2355,8 +2688,14 @@ export function apply(ctx) {
               unresolved: health.rows.filter((row) => row.status === 'unresolved').map((row) => row.name),
               unmounted: health.unmounted,
               peers: health.peers ? health.peers.status + ':' + String(health.peers.reason) : null,
+              // 第四层：运行时 Fiber 状态。装完那一刻通常还是 pending
+              // （loader 要下一个 tick 才挂），所以这里如实记，别当成失败。
+              staticVerdict: health.staticVerdict ?? null,
+              activation: health.activation ? String(health.activation.phase) : 'unknown',
             })
           }
+          // 成功：清掉失败标记，并把这一行的按钮按新状态重算。
+          markInstallFailure(row?.key || key || '', false)
           return sendJson(res, 200, {
             ok: true,
             key: row?.key || key || null,
@@ -2385,6 +2724,43 @@ export function apply(ctx) {
             })
           }
           const detail = message(cause)
+          const failure = classifyInstallFailure(cause, detail)
+
+          // 「已经装好了」是幂等成功，不是失败。
+          //
+          // 宿主有两处会抛 already-installed（dsh-plugin-manager）：
+          //   · HMR 下重装已知包（`Object.hasOwn(before, known)`）
+          //   · 装前预检 refused（path / registry 两条）
+          // 两者都意味着目标状态已经达成 —— 报成 500，用户只会反复点安装。
+          // 所以这里回 200，并带 note 说明「为什么没有重新下载」。
+          if (failure.outcome === 'already-present') {
+            const packageName = packageNameFromSpec(effectiveSpec)
+            const health = installedHealth(packageName, effectiveSpec)
+            logger?.info?.('[market-lens] install already-present spec=' + effectiveSpec + ' pkg=' + String(packageName))
+            logInstall('info', 'install.already-present', {
+              key: key || '(empty)',
+              spec: effectiveSpec,
+              packageName,
+              origin: resolved.origin,
+              ms: Date.now() - startedAt,
+              verdict: health.verdict,
+              detail: failure.evidence,
+            })
+            return sendJson(res, 200, {
+              ok: true,
+              code: 'already-installed',
+              spec: effectiveSpec,
+              key: row?.key || key || null,
+              origin: resolved.origin || 'manual',
+              fellBackFrom,
+              // 明确告诉前端：这次没真的下载，只是确认目标已就位
+              alreadyPresent: true,
+              note: '目标版本已经装好了（宿主判定已安装，未重新下载）',
+              installed: installedState(),
+              health,
+            })
+          }
+
           // 降级过的话 effectiveSpec 已经不带 #path: 了，所以用第一次尝试的目标判断。
           const attemptedSpec = fellBackFrom || effectiveSpec
           const subdirMissing = attemptedSpec.includes('#path:') && /ERR_PNPM_INVALID_PATH|not a valid sub-directory/i.test(detail)
@@ -2392,8 +2768,10 @@ export function apply(ctx) {
           // 必须把「关掉 DSH 再装」这句话给出去，否则用户只会反复点安装。
           const fileBusy = isFileBusy(cause)
           const busyPackage = fileBusy ? busyPackageFrom(cause) : null
-          const code = fileBusy ? 'file-busy' : (subdirMissing ? 'subdir-missing' : null)
-          logger?.info?.('[market-lens] install failed key=' + (key || '(empty)') + ' origin=' + String(resolved.origin) + ' spec=' + effectiveSpec + ' error=' + detail)
+          // code 以失败分类器为准：它认得宿主的 11 个 ManagementFailure 码，
+          // 比原来只有 file-busy / subdir-missing 两种精确得多。
+          const code = failure.code || (fileBusy ? 'file-busy' : (subdirMissing ? 'subdir-missing' : null))
+          logger?.info?.('[market-lens] install failed key=' + (key || '(empty)') + ' origin=' + String(resolved.origin) + ' spec=' + effectiveSpec + ' code=' + String(code) + ' layer=' + failure.layer + ' error=' + detail)
           logInstall('error', 'install.failed', {
             key: key || '(empty)',
             spec: effectiveSpec,
@@ -2402,18 +2780,38 @@ export function apply(ctx) {
             origin: resolved.origin,
             ms: Date.now() - startedAt,
             code,
+            layer: failure.layer,
+            retryable: failure.retryable,
+            action: failure.action,
+            evidence: failure.evidence,
+            incompatible: failure.incompatible ? failure.incompatible.map((item) => String(item?.name ?? item)).join(', ') : null,
             busyPackage,
             retried: fileBusy ? 3 : 0,
             detail,
             stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null,
           })
+          // 这一行刚失败过：按钮要立刻变成「重试」，并且**目录刷新后仍然保持**
+          // （client 的 actionBusy 活不过一次 catalog 拉取）。
+          markInstallFailure(row?.key || key || '', true)
           return sendJson(res, 500, {
             ok: false,
             spec: effectiveSpec,
             fellBackFrom,
             origin: resolved.origin,
+            // 前端按 code 决定给哪些按钮，按 layer 决定标题里说「哪一层」
             code: code || undefined,
+            layer: failure.layer,
+            retryable: failure.retryable,
+            action: failure.action,
+            evidence: failure.evidence,
+            incompatible: failure.incompatible,
+            // 兼容性拦截要给**真的能用的**下一步：宿主提供了 exact-version exemption，
+            // 但 market-lens 原来没把它接上，「仍然安装」点了还是同一个错误。
+            // 只在真的撞上兼容性时才去算（其它失败算出来也没人用，
+            // 且会让「拿不到运行时版本」的噪声混进无关回执）。
+            exemption: failure.layer === FAILURE_LAYERS.compat ? incompatibleVerdict(effectiveSpec) : null,
             busyPackage,
+            detail,
             error: fileBusy
               ? '文件被占用，已自动重试 3 次仍失败。\n'
                 + (busyPackage ? '被占用的包：' + busyPackage + '\n' : '')
@@ -2526,17 +2924,41 @@ export function apply(ctx) {
             })
           }
           const detail = message(cause)
+          const failure = classifyInstallFailure(cause, detail)
+          // 升级时报「已安装」有两种含义：目标版本已经就是它，或者宿主在 HMR 下
+          // 认定这个包已知。两种都不该算失败 —— 升到同一个版本本来就是成功。
+          if (failure.outcome === 'already-present') {
+            upgradeLog('info', 'upgrade.already-present', { version, spec, ms: Date.now() - startedAt, detail: failure.evidence })
+            return sendJson(res, 200, {
+              ok: true,
+              code: 'already-installed',
+              pkg,
+              version,
+              spec,
+              alreadyPresent: true,
+              note: '目标版本已经是当前版本（宿主判定已安装，未重新下载）',
+              installed: installedState(),
+              health: installedHealth(pkg, spec),
+            })
+          }
           // 升级同样会因为宿主占着旧版本目录而 EPERM：这不是版本问题，必须说清楚。
           const fileBusy = isFileBusy(cause)
           const busyPackage = fileBusy ? busyPackageFrom(cause) : null
-          logger?.info?.('[market-lens] upgrade failed spec=' + spec + ' error=' + detail)
-          upgradeLog('error', 'upgrade.failed', { version, spec, ms: Date.now() - startedAt, code: fileBusy ? 'file-busy' : null, busyPackage, retried: fileBusy ? 3 : 0, detail, stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null })
+          const code = failure.code || (fileBusy ? 'file-busy' : null)
+          logger?.info?.('[market-lens] upgrade failed spec=' + spec + ' code=' + String(code) + ' layer=' + failure.layer + ' error=' + detail)
+          upgradeLog('error', 'upgrade.failed', { version, spec, ms: Date.now() - startedAt, code, layer: failure.layer, retryable: failure.retryable, action: failure.action, evidence: failure.evidence, busyPackage, retried: fileBusy ? 3 : 0, detail, stack: cause?.stack ? String(cause.stack).split('\n').slice(0, 4).join(' | ') : null })
           return sendJson(res, 500, {
             ok: false,
             pkg,
             version,
             spec,
-            code: fileBusy ? 'file-busy' : undefined,
+            code: code || undefined,
+            layer: failure.layer,
+            retryable: failure.retryable,
+            action: failure.action,
+            evidence: failure.evidence,
+            incompatible: failure.incompatible,
+            exemption: failure.layer === FAILURE_LAYERS.compat ? incompatibleVerdict(pkg + '@' + version) : null,
             busyPackage,
             error: fileBusy
               ? '文件被占用，已自动重试 3 次仍失败。\n'

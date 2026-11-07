@@ -1,8 +1,24 @@
-# DSH 插件市场雷达（@local/market-lens）
+# DSH 插件市场雷达（npm: @jntm114514/market-lens）
 
 把多个 DSH 插件市场聚合成一张可像 Excel 一样筛选、可拖动列宽的表，并用 npm 元数据判断插件是否适配当前 DSH 运行时。
 
 ![插件表格](docs/screenshot-table.png)
+
+## 安装
+
+```bash
+npm i @jntm114514/market-lens
+```
+
+装进 DSH 之后还要让 profile 认识它：
+
+1. 把包装进当前 profile（DSH 插件管理器安装，或直接 `npm i` 到 profile 目录）；
+2. profile 的 `package.json` 里 `dsh.profile.bundles` 加上 `"@jntm114514/market-lens"`；
+3. 重启 DSH，左侧栏会出现「市场雷达」入口。
+
+> 仓库里的 `package.json` 写的是 `@local/market-lens` —— 那是**本地开发身份**（符号链接安装用）。
+> 往 registry 发布时由发布工具在**临时副本**里改名，并同步 `cordis.patch.yml` 的 `name:` 与
+> `client.js` 的 `__ModuleLoader__` `id`；源码里这两个值保持本地身份不变。
 
 ## 它解决什么
 
@@ -44,6 +60,314 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 | 来源配置迁移 | ❌ | ✅ 自定义源 / 启停 / 定时 / 安全视图导出成 JSON，换机或团队共享 |
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
+
+## 0.13.0：兼容性拦截给一条真的能走的路
+
+### 问题
+
+宿主在 pnpm 装完后会复核兼容性，检出 `incompatible-version` 就**整批回滚**：
+
+```
+dsh: installation rejected: Plugin dsh-tidy-display@0.4.7 is incompatible with dsh 0.2.2-rc.1:
+     requirements {"engines.dsh":"0.1.0-rc.2 || ... || 0.2.1-rc.5"}
+dsh: To accept this risk explicitly, grant the exact-version exemption
+     for dsh-tidy-display@0.4.7 on dsh 0.2.2-rc.1 with `dsh plugin allow-version`
+     or the plugin manager, then retry the installation or restart dsh.
+dsh: nothing was installed.
+```
+
+宿主**给了出路**，但 market-lens 只把这条错误归到 `compat` 层、给个 `force` 提示就结束 —— 「仍然安装」是个摆设，点了还是同一个错误。
+
+### 现在：接上宿主的 exact-version exemption
+
+新增 `lib/exempt.js` + 两个 op：
+
+| op | 作用 |
+| --- | --- |
+| `exempt.grant` | 写 profile 的 `compatibility.json`，授予精确版本豁免 |
+| `exempt.revoke` | 撤销（用户反悔，或想恢复"一律拦截"） |
+
+落盘形状与宿主 `readProfileCompatibility` 完全一致：
+
+```json
+{ "dsh-tidy-display@0.4.7": ["0.2.2-rc.1"] }
+```
+
+界面侧：「仍然安装并授豁免」按钮 → 先 `exempt.grant`（带 `acceptRisk: true`，那一下点击就是明确同意）→ 立刻重试安装。
+
+### 三条硬约束（照抄宿主的校验）
+
+1. **key 必须是精确的 `package@version`** —— 范围 / 标签 / `latest` / `workspace:` 全部拒绝
+2. **值必须是当前这个 DSH 的版本** —— 批准别的版本号无效（宿主自己也拒绝）
+3. **`compatibility.json` 坏掉时不许改写** —— 改写了会冲掉用户原有内容；这种情况只报"请先手工修"
+
+还有一条不是宿主的要求、但必须守的：**不给 `acceptRisk: true` 就不授予**。不弹确认就写豁免，等于替用户按下"我接受数据丢失风险"。
+
+### 失败回执里的变化
+
+`incompatible-version` 现在带回三样东西：
+
+```json
+"exemption": {
+  "key": "dsh-tidy-display@0.4.7",
+  "runtimeVersion": "0.2.2-rc.1",
+  "granted": false,
+  "canGrant": true,
+  "reason": null,
+  "compatibilityFile": "compatibility.json"
+}
+```
+
+界面按 `canGrant` / `granted` 给出不同的话：能授就说"点这颗按钮会写 compatibility.json"，已授就说"重启 DSH 让它重新读"。
+
+### 注意：豁免可能要重启才生效
+
+豁免写在 profile 目录里，宿主的 profile 是**已经加载**的。`exempt.grant` 的响应带 `restartRequired: true`，界面也会明说"如果这次仍然被拦，重启后再点一次安装"——不假装即时生效。
+
+---
+
+## 0.12.0：ETag 确认式缓存 + fiberPhase 激活诊断
+
+### 只有 304 才算「确认最新」
+
+目录缓存原来是 TTL 式覆盖：每个同步周期整份重拉、整份重写 46MB 的 `catalog.json`，源站哪怕一个字都没改。
+
+现在逐源记一份条件请求记录：
+
+```json
+"sourceCaches": {
+  "dshfind": { "etag": "\"v1\"", "lastModified": null,
+               "lastConfirmedAt": "2026-11-07T...", "failureCount": 0 }
+}
+```
+
+- 下次请求带 `If-None-Match` / `If-Modified-Since`
+- 回 **304** → **不重写快照**，只把 `lastConfirmedAt` 推进到 now
+- 回 **200** → 正常落盘，更新标记
+
+**一条硬约束**：只有 304 才算确认最新。网络失败 / 5xx / 超时 / JSON 坏了 —— 一律不推 `lastConfirmedAt`，也不能静默沿用旧目录假装同步成功。过期目录对用户是错误答案，比报错更糟：他会以为"这个插件不存在"，而其实是"目录没拉到"。
+
+配套的三种 stale 原因分开说：
+
+| reason | 含义 | 该怎么办 |
+| --- | --- | --- |
+| `never` | 从没成功过 | 检查源地址 |
+| `last-sync-failed` | 上次同步失败 | 重试 |
+| `last-confirmed-too-long-ago` | 太久没确认 | 触发一次同步 |
+
+`status.cacheStaleness` 给出整份目录的聚合结论（`stale` / `earliestConfirmedAt` / `degraded[]`），逐源也在 `sourceHealth[]` 上带 `lastConfirmedAt` / `hasConditionalMarker` / `stale` / `staleReason`。
+
+**304 最容易写错的一处**：`notModified` 的源 `items` 是 `null`（服务端没发 body）。如果直接 `flatMap`，那个源的条目会整体消失 → `diffRows` 判成「下架」→ 用户看到「一大批插件被下架了」，而其实只是"没变化"。现在 304 的源会从上一份目录里捞回属于它的行；一行若有本轮真拉到数据的别的源支撑，就由那一份决定，不由 304 续命。
+
+### installed ≠ activated：fiberPhase
+
+前三层（依赖 / 挂载 / 装载行）全对，插件仍然可能**根本没跑起来**。Cordis 给每个入口建一个 Fiber：
+
+```
+FIBER_STATE: PENDING 0 / LOADING 1 / ACTIVE 2 / FAILED 3 / DISPOSED 4 / UNLOADING 5
+phase:       pending / loading / active / failed / null        / unloading
+```
+
+只有 `active` 才算真的挂上了。`failed` 时 dsh 自己的日志里也不一定有一行能看懂的报错。
+
+判定口径照抄 `dsh-host-plugin-inventory/lib/index.js`，数据从 `ctx.loader.entries()` 读（宿主自己也是这么读的），不注入那个 remote service —— 它的注入时机不可靠。
+
+`verdict` 现在多两档：
+
+| verdict | 判据 | 界面 |
+| --- | --- | --- |
+| `activated` | 前三层全通 + fiber `active` | 绿色「安装完成」 |
+| `installed-not-active` | 前三层全通，但 fiber 是 `failed` / `pending` / `loading` | 橙色「装好了，但没激活」+ 具体 phase |
+| `installed-disabled` | `entry.disabled` | 橙色，说明"已禁用，不会运行" |
+
+拿不到 `ctx.loader` 时退回静态结论 —— **不可知 ≠ 没激活**，这条边界很重要。
+
+### 顺带
+
+`sourceCaches` 存进 `source-config.json` 而不是 `catalog.json`：它描述的是「源的状态」而不是「目录的内容」，清缓存时不该被顺手清掉。导出配置时**不带**它（换机后旧 ETag 对新环境没意义）。
+
+---
+
+## 0.11.0：空表三态 + 源级新鲜度上屏
+
+### 空表不再只有一句话
+
+0.10.0 之后表格还是只有一个空态文案 `emptyFiltered`（"没有符合当前筛选条件的插件。"）。于是：
+
+- 目录**从没同步过** → 显示"没有符合筛选条件"
+- 筛选**太狠** → 显示同一句
+
+两句话的下一步完全不同（前者点同步、后者清筛选），用户照着错的那条做，怎么都出不来数据。
+
+`emptyCatalog` 这个 i18n key 早在 0.6.0 就写好了，但代码 **0 次引用**。现在接上：
+
+| 情况 | 文案 | 出口 |
+| --- | --- | --- |
+| 目录里确实没有行 | `emptyCatalog`「目录为空，先同步一次。」 | 空态里直接给「同步市场」按钮 |
+| 目录有行但被筛掉了 | `emptyFiltered`「没有符合当前筛选条件的插件。」 | 工具栏的「清除筛选」 |
+| 同步中 | 保留现有同步进度提示 | — |
+
+判定用 `allRows`（全量）而不是当前页的行——用分页后的行去判"目录空"会把有数据误报成空。
+
+### 源级新鲜度上屏
+
+多源聚合下单个源失败**不会报错**，只是它那份条目少了一批。用户看到的是「这个插件搜不到」——结论错了，原因却在别处。
+
+数据一直在 `status.sourceHealth`（`lastSuccessAt` / `failureCount` / `lastError`），但以前只在「来源」页可见，而用户排查"搜不到"时不会去那儿。
+
+现在市场页顶部会出现一条状态带：
+
+```
+部分来源不可用：  dsh.so · dshfind （连续失败，本节结果可能缺少它那份条目）   [强制重试]
+```
+
+判定口径（严格，避免误报）：
+
+- 只有 `failureCount > 0` 或 `lastSuccessAt === null` 的源才算降级
+- **被禁用的源不算**——那是用户自己关的，不是故障
+- 全部健康时**什么都不渲染**（状态带只在有话说时出现）
+- 最多点名 4 个源，其余折叠成 `+N`
+- 同步中禁用重试按钮
+
+---
+
+## 0.10.0：按钮状态由 Host 下发，六种语义只有一处实现
+
+0.9.0 让失败说清楚了。这一版解决按钮本身的语义混乱：**同一行可能同时表现为「✓ 已装」和「已是最新」**，或者「更新」按钮点了只是重装同一个版本。
+
+### 原来状态散在三处
+
+| 位置 | 口径 |
+| --- | --- |
+| client `actionStateOf()` | 只看 `installed` + `update.available` |
+| client 按钮分支 | `done && update` / `done` / `failed` 三个布尔 |
+| i18n `installedUpToDate` | 定义了，但**代码 0 次引用** |
+
+三者不一致，于是出现「按钮写着 ↑ 2.0.0，实际装的是 1.0.0」这类错位。
+
+### 现在：Host 算一份 `button` 下发
+
+`lib/button-state.js` 是唯一实现，六种稳定状态：
+
+| state | 条件 | 按钮 | 点一下 |
+| --- | --- | --- | --- |
+| `install` | 未装，且折得出目标 | 「装」 | op:install，按目录版本（可降级） |
+| `manual` | 折不出目标 | 「手动」 | 打开官方页两步指引 |
+| `update` | 已装 + 有新版 | 「更新 ↑ x.y.z」 | op:upgrade，装到**正好**那个版本（不降级） |
+| `current` | 已装 + registry 包 + 无新版 | 「✓ 已是最新」 | op:install 幂等重装 |
+| `installed-local` | 已装 + link/local/github | 「✓ 已装」 | op:install 幂等重装 |
+| `retry` | 上一次安装失败 | 「重试」（红边） | 重放上次动作 |
+
+`publicRow` 直接下发：
+
+```json
+"button": { "state": "update", "mode": "upgrade", "op": "upgrade",
+            "version": "2.0.0", "labelKey": "actUpdate", "titleKey": "actUpdateHint" }
+```
+
+client 只查表渲染，不再自己推。**加一种状态只需改 Host + 补 i18n，不用碰按钮分支。**
+
+### `current` 与 `installed-local` 为什么必须分开
+
+- `current` = **查过、确认没有新版**
+- `installed-local` = **根本没法比**（link / file / github / `@local/*`）
+
+混成一个会让 link 装的包显示「已是最新」—— 而它从没查过。判定用 profile 里记的 spec：
+
+```
+link:G:/...      → installed-local
+github:o/r       → installed-local
+1.0.0            → 可以比 → current
+```
+
+### `retry` 跟着行走，不只活在页面上
+
+client 的 `actionBusy` 只活到下一次 `catalog` 拉取。于是「刚刚装失败」的行刷新后又变回「装」，用户以为上次成功了。
+
+现在 Host 用内存集合 `installFailures` 记失败 key：
+
+- `install` / `upgrade` 失败 → 标记，`button.state = 'retry'`
+- 成功或重新开始 → 清标记
+- 不落盘：重启后按钮回到正常状态是**对的**（重启意味着重新开始）
+
+### 顺带修掉
+
+- `installedUpToDate` 这个死 key 终于被 `current` 用上了
+- `reinstall` 语义不再被折叠：`actionBusy.mode` 现在区分 `install / reinstall / upgrade`，按钮显示「重装中…」
+- `upgradeTo` 以 Host 下发的 `button.version` 为准，不再和 `row.update.to` 各算一份
+
+真实目录验证（25,691 行）：`install 25677 · current 12 · update 2 · manual 0 · 非法状态 0`。
+
+---
+
+## 0.9.0：安装失败要分层说清楚，别只给一坨 pnpm 原文
+
+0.8.0 解决了"装了但不出现"。这一版解决另一件更日常的事：**失败了，但用户不知道哪一段坏了。**
+
+### 已安装不再算失败
+
+宿主 `dsh-plugin-manager` 有两处会抛 `already-installed`：
+
+- HMR 下重装已知包（`Object.hasOwn(before, known)`）
+- 装前预检 refused（path / registry 两条路径）
+
+两处都意味着**目标状态已经达成**。旧代码把所有错误一视同仁回 500，用户看到「安装失败」，于是反复点安装——而它其实早就装好了。
+
+现在回 200：
+
+```json
+{ "ok": true, "code": "already-installed", "alreadyPresent": true,
+  "note": "目标版本已经装好了（宿主判定已安装，未重新下载）",
+  "health": { "verdict": "ok", "mounted": true } }
+```
+
+升级路径同理：升到当前版本本来就是成功，不是失败。
+
+### 13 个宿主失败码 + 10 个 pnpm 码，各归其层
+
+这些码不是猜的，全部来自宿主源码（`dsh-plugin-manager/lib/index.js` 的 `failure.js` 与 `refused()`）：
+
+| 层 | 码 | 该给的动作 |
+| --- | --- | --- |
+| `state` | `already-installed` | 不是失败（回 200） |
+| `resolve` | `ambiguous-install` / `invalid-spec` / `not-a-package` / `ERR_PNPM_PEER_DEP_ISSUES` | 选择 / 改输入 / 明确同意 |
+| `version` | `ERR_PNPM_NO_MATCHING_VERSION` / `ERR_PNPM_FETCH_404` | 换最新版重试 |
+| `subdir` | `ERR_PNPM_INVALID_PATH` | 复制命令 |
+| `compat` | `incompatible-version` | 展示明细 + 「仍然安装」 |
+| `declare` | `not-bundle` / `not-a-bundle` | 明说"这是普通依赖，装了不会有面板" |
+| `build` | `stale-approval` / `ERR_PNPM_IGNORED_BUILDS` | 重新取 pendingBuilds 再确认 |
+| `workspace` | `ERR_PNPM_ADDING_TO_ROOT` | 复制命令（见下） |
+| `lock` | `EPERM` / `EBUSY` / `ETXTBSY` / `ERR_PNPM_UNEXPECTED_STORE` / `ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY` | 退避重试或复制命令 |
+| `permission` | `management-required` / `not-removable` | 只读，不给按钮 |
+| `activation` | `bundle-in-use` / `stop-profile` | 先禁用 / 关掉 DSH |
+| `inventory` | `unknown-plugin` | 刷新后重试 |
+
+回执标题现在直接说层级：
+
+```
+安装失败 · 版本解析层
+ERR_PNPM_NO_MATCHING_VERSION No matching version found for foo@9.9.9
+目录里写的版本在 npm 上不存在，可以用最新版本重试。   [改用最新版] [复制命令]
+```
+
+### `ADDING_TO_ROOT` 为什么只给「复制命令」
+
+profile 目录里确实有 `pnpm-workspace.yaml`（`packages: [.]`、`nodeLinker: hoisted`），所以 pnpm 会把 `pnpm add` 当成向 workspace root 添加，报 `ERR_PNPM_ADDING_TO_ROOT`。
+
+但**本插件从不直接调 pnpm** —— 它调 `pluginManager.installBundle()`，宿主内部 `execa("pnpm", ...)` 且不传 `-w`。本插件没有任何参数能塞进去。所以这一条只能让用户拿去终端执行，而不是假装能自动重试。
+
+同理，宿主已经在 `execa` 前后存 `package.json` / `pnpm-lock.yaml` 全文并在失败时 `restore()` + `pnpm install --frozen-lockfile` 回滚（第 653–675、833–870 行）。本插件**不重复实现**残缺目录隔离——那会和宿主的 restore 抢写同一批文件。
+
+### 顺带：运行时探测适配新版 DSH 布局
+
+新 DSH（`2.0.22-next`）的 asar 又变了：没有 `dsh/` 子目录，`dsh-app-boot` 直接在 `node_modules/@deepseek-ai/` 下。`lib/runtime.js` 现在两种布局都认：
+
+```
+DSH NEXT :  app.asar/node_modules/@deepseek-ai/dsh-app-boot  → 0.2.2-rc.1
+desktop  :  app.asar/dsh/node_modules/@deepseek-ai/dsh-app-boot → 0.2.1-rc.5
+```
+
+---
 
 ## 0.8.0：安装后到底能不能加载 —— 三层装机体检
 
