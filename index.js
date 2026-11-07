@@ -10,6 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { CompatService } from './lib/compat.js'
 import {
@@ -62,6 +63,8 @@ import {
   stalenessOf,
 } from './lib/source-cache.js'
 import { activationOf, collectActivation, mergeActivation } from './lib/activation.js'
+import { POSTINSTALL_VERDICTS, inspectPostinstall } from './lib/postinstall.js'
+import { STORE_VERDICTS, inspectStore, isStoreMismatchError } from './lib/store-guard.js'
 import { COMPATIBILITY_FILE, EXEMPT_RESULT, grantExemption, hasExemption, readCompatibility } from './lib/exempt.js'
 import { OpLog } from './lib/op-log.js'
 import {
@@ -1499,6 +1502,39 @@ export function apply(ctx) {
   }
 
   /**
+   * 探测当前 pnpm 会用哪个 store。
+   *
+   * 为什么要 spawn：store 位置取决于 pnpm 自己的配置解析（global config /
+   * .npmrc / pnpm-workspace.yaml 里的 storeDir），没有纯 JS 的可靠读法。
+   * 只在需要时调用（安装失败、或用户主动体检），不进每次 status。
+   *
+   * cwd 必须是 profile —— pnpm 的 store 探测看的就是调用目录。
+   *
+   * @returns {string|null}
+   */
+  function detectedStorePath() {
+    try {
+      const pnpm = process.env.PNPM_BIN || 'pnpm'
+      const run = spawnSync(pnpm, ['store', 'path'], {
+        encoding: 'utf8',
+        cwd: profileDir,
+        shell: true,
+        timeout: 30_000,
+      })
+      const text = ((run.stdout || '') + (run.stderr || '')).trim().split(/\r?\n/).filter(Boolean).pop()
+      return text || null
+    } catch (error) {
+      logger?.debug?.('[market-lens] pnpm store path failed: ' + message(error))
+      return null
+    }
+  }
+
+  /** store 体检（只在需要时算）。 */
+  function storeHealth() {
+    return inspectStore({ profileDir, detectedStore: detectedStorePath() })
+  }
+
+  /**
    * 重算整表按钮状态。目录/已装集合/更新结论三者任意一个变了都要重跑，
    * 否则按钮会停在过期状态（真机上见过「升级完了按钮还是 ↑ x.y.z」）。
    */
@@ -2801,6 +2837,47 @@ export function apply(ctx) {
           }
           const detail = message(cause)
           const failure = classifyInstallFailure(cause, detail)
+
+          // ---- store 位置不一致：这是「重试一万次也一样」的必然失败 ----
+          //
+          // pnpm 的 store 位置取决于调用时的工作目录。从别的盘（G:）调用时它退回
+          // <盘>\.pnpm-store 并把绝对路径写进 node_modules/.modules.yaml；
+          // 此后从 profile 目录调用就会报 ERR_PNPM_UNEXPECTED_STORE。
+          //
+          // 关键：这**不是插件的问题**，也不是网络/版本问题。回执必须说清楚，
+          // 否则用户只会反复点安装。修法只有一条：用同一个 store 重建 node_modules。
+          const storeMismatch = isStoreMismatchError(detail)
+          if (storeMismatch) {
+            const store = storeHealth()
+            logger?.info?.('[market-lens] install blocked by store mismatch spec=' + effectiveSpec + ' recorded=' + String(store.recorded) + ' detected=' + String(store.detected))
+            logInstall('error', 'install.store-mismatch', {
+              spec: effectiveSpec,
+              origin: resolved.origin,
+              recordedStore: store.recorded,
+              detectedStore: store.detected,
+              verdict: store.verdict,
+            })
+            markInstallFailure(row?.key || key || '', true)
+            return sendJson(res, 500, {
+              ok: false,
+              spec: effectiveSpec,
+              fellBackFrom,
+              origin: resolved.origin,
+              code: 'ERR_PNPM_UNEXPECTED_STORE',
+              layer: 'lock',
+              retryable: false,
+              action: 'copy-cmd',
+              evidence: store.detail || detail.split(/\r?\n/).filter(Boolean)[0] || detail,
+              // store 体检的完整结论一起带出去，前端可以照实说
+              store,
+              detail: store.detail || detail,
+              error: (store.detail || detail) +
+                '\n\n修法（在 profile 目录里执行，cwd 必须是它）：\n' +
+                '  1. pnpm store path            # 确认当前 pnpm 用哪个 store\n' +
+                '  2. pnpm install               # 用同一个 store 重建 node_modules\n' +
+                '\n不要手改 node_modules/.modules.yaml —— 它只是记账，硬链接实际指向的还是旧 store。',
+            })
+          }
 
           // 「已经装好了」是幂等成功，不是失败。
           //

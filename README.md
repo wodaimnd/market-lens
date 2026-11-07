@@ -61,6 +61,63 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.16.0：store 位置不一致——重试一万次也一样
+
+### 事故
+
+```
+[ERR_PNPM_UNEXPECTED_STORE] Unexpected store location
+The dependencies at "...\profiles\next\node_modules" are currently linked
+from the store at "G:\AI PGRM\POJ\.diag\pnpm-store\v11".
+pnpm now wants to use the store at "C:\Users\Shinelon\AppData\Local\pnpm\store\v11".
+```
+
+于是**任何安装都失败**，而回执只能说"安装失败"——用户完全看不出这跟插件无关。
+
+### 为什么会发生
+
+pnpm 的 store 位置取决于**调用时的工作目录**，不是 `--dir`。从 `G:` 盘调用 pnpm 时，它无法把 `G:\.pnpm-store` 硬链接进 `C:` 盘的 profile，就退回 `G:\<某目录>\.pnpm-store`，并把这个绝对路径写进 `node_modules/.modules.yaml`。此后从 profile 目录调用 pnpm，探测到的是 `AppData` 那个 store，两者不符 → 每次写操作都报 `ERR_PNPM_UNEXPECTED_STORE`。
+
+**症状延迟出现**：装的时候没事，下一次宿主调用 pnpm 才报。
+
+### 现在：装前就能看见，装中说得清
+
+新增 `lib/store-guard.js`，判定只需要两个数：
+
+- `node_modules/.modules.yaml` 里记录的 `storeDir`
+- 从 profile 目录探测到的 `storeDir`
+
+四种结论：
+
+| verdict | 含义 |
+| --- | --- |
+| `ok` | 一致（`C:/x` 与 `C:\x` 按同一路径比较，不假报） |
+| `mismatch` | 不一致 → 任何安装必然失败 |
+| `not-installed` | 还没有 `node_modules`，谈不上错位（不是故障） |
+| `unknown` | 读不到记录或探测不到 → 不猜 |
+
+install 失败时若命中 `ERR_PNPM_UNEXPECTED_STORE`，回执直接说清：
+
+```
+node_modules 是按 G:\AI PGRM\POJ\.diag\pnpm-store\v11 装的，
+但当前 pnpm 要用 C:\Users\Shinelon\AppData\Local\pnpm\store\v11
+—— 任何安装/卸载都会报 ERR_PNPM_UNEXPECTED_STORE。这不是插件的问题。
+
+修法（在 profile 目录里执行，cwd 必须是它）：
+  1. pnpm store path            # 确认当前 pnpm 用哪个 store
+  2. pnpm install               # 用同一个 store 重建 node_modules
+
+不要手改 node_modules/.modules.yaml —— 它只是记账，硬链接实际指向的还是旧 store。
+```
+
+最后那句是这轮最贵的认知：**手改记录只会骗过检查**，硬链接仍然指向旧 store，症状会在下一次安装时准确复现。
+
+### 边界
+
+`spawnSync('pnpm store path')` 只在**需要时**调用（安装失败、或用户主动体检），不进每次 `status`。cwd 必须是 profile —— pnpm 的 store 探测看的就是调用目录。
+
+---
+
 ## 0.15.0：安装钩子——它会不会改写你的 profile
 
 ### 事故
