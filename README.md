@@ -61,6 +61,66 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.16.1：storeDir 是基础路径，不是完整路径
+
+### 事故
+
+0.16.0 修了 store 不一致，但**修错了地方**：
+
+```yaml
+# 0.16.0 写的（错）
+storeDir: C:/Users/Shinelon/AppData/Local/pnpm/store/v11
+```
+
+于是 pnpm 报：
+
+```
+pnpm now wants to use the store at "...\store\v11\v11"
+```
+
+**双层的 `v11/v11`** —— 因为 pnpm 的 `storeDir` 语义是**基础路径，会自己追加版本子目录**。
+
+官方文档（[pnpm.io/settings/store](https://pnpm.io/settings/store)）写得很清楚：
+
+> `storeDir` 默认 `~/AppData/Local/pnpm/store`（**不含版本号**）
+> 版本目录由 pnpm 在该路径下建立
+
+正确写法：
+
+```yaml
+storeDir: C:/Users/Shinelon/AppData/Local/pnpm/store
+```
+
+### 这一轮的三个修正
+
+**1. `storeDir` 改回基础路径**（`next` profile 已实际修复）
+
+**2. 路径比较加归一化**
+
+修完之后 `pnpm store path` 输出 `.../store\v11`（混合分隔符），而 `.modules.yaml` 记的是 `.../store/v11` —— 字符串不同、实为同一目录。不做归一就会**假报不一致**。现在统一把 `/` 归成 `\`、去掉末尾反斜杠、再 `resolve` + 小写比较。
+
+**3. 新增 `inspectStoreDirConfig`：配置写错本身要报**
+
+即便当下记录与探测碰巧一致，只要 `storeDir` 写成带版本目录的形式，**下次 pnpm 重算就会错位**。所以提前报，而不是等它坏：
+
+```
+storeDir 写成了带版本目录的形式（.../store/v11）。pnpm 的 storeDir 是基础路径，
+它会自己追加版本子目录，于是实际用的是 .../store/v11\v11 之类的双层路径
+—— 与 node_modules 记录的路径不符就会报 ERR_PNPM_UNEXPECTED_STORE。
+正确写法：storeDir: .../store
+```
+
+### 实测
+
+```
+next:    ok  配置 .../store（基础路径）  记录/探测均 .../store\v11
+desktop: ok  未配置                    记录/探测均 .../store\v11
+```
+
+真实安装验证：`awesome-dsh-plugin` 2.6 秒装完、`storeDir` 未被改坏、随后干净卸载。孤儿目录 `store/v11/v11`（0.01 MB 空壳）已删除，主 store 完好。
+
+---
+
 ## 0.16.0：store 位置不一致——重试一万次也一样
 
 ### 事故

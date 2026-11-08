@@ -1529,9 +1529,35 @@ export function apply(ctx) {
     }
   }
 
+  /**
+   * 读 profile 的 pnpm-workspace.yaml 里配的 storeDir（没配就返回 null）。
+   *
+   * 为什么要读它：`storeDir` 是**基础路径**，pnpm 会自己追加版本子目录。
+   * 写成 `.../store/v11` 会让它追加成 `.../store/v11/v11` —— 这是
+   * ERR_PNPM_UNEXPECTED_STORE 的另一个来源，而且**改记录/重装都治不了**，
+   * 必须先改配置。所以体检必须能看见这一项。
+   */
+  function configuredStoreDir() {
+    try {
+      const file = path.join(profileDir, 'pnpm-workspace.yaml')
+      if (!fs.existsSync(file)) return null
+      const text = fs.readFileSync(file, 'utf8')
+      // 只认顶层 `storeDir:`（缩进 0），避免误读别处的同名键
+      const match = /^storeDir\s*:\s*([^\r\n#]+)/m.exec(text)
+      return match ? match[1].trim() : null
+    } catch (error) {
+      logger?.debug?.('[market-lens] read pnpm-workspace.yaml failed: ' + message(error))
+      return null
+    }
+  }
+
   /** store 体检（只在需要时算）。 */
   function storeHealth() {
-    return inspectStore({ profileDir, detectedStore: detectedStorePath() })
+    return inspectStore({
+      profileDir,
+      detectedStore: detectedStorePath(),
+      configuredStoreDir: configuredStoreDir(),
+    })
   }
 
   /**
