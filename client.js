@@ -1860,9 +1860,12 @@ window.__ModuleLoader__.load({
       '.ml-scroll::-webkit-scrollbar-corner { background: transparent; }',
       // Firefox / 非 webkit 内核：标准属性同样生效
       '.ml-scroll { scrollbar-width: thin; scrollbar-color: var(--dsw-alias-border-l2) transparent; }',
-      // 表格自己原有的横向滚动条规则保留（它 class 不同名，行为一致）
-      '.ml-table-scroll::-webkit-scrollbar { height: 10px; }',
+      // 表格自己的滚动条：横向 + 纵向都要有样式 ——
+      // 纵向滚动现在发生在这个容器内部（为了冻结表头），
+      // 不补样式会出现一条系统默认宽度的粗滚动条，和页面其它滚动条不一致。
+      '.ml-table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }',
       '.ml-table-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-border-l2); border-radius: 999px; }',
+      '.ml-table-scroll { scrollbar-width: thin; scrollbar-color: var(--dsw-alias-border-l2) transparent; overscroll-behavior: contain; }',
       '.ml-resizer:hover, .ml-resizer:active { background: var(--dsw-alias-brand-primary); opacity: 0.55; }',
       // 折叠文本：默认只显示 N 行，超出部分淡出，点「展开」看全文。
       // 用 max-height + 渐变遮罩而不是 -webkit-line-clamp，是因为后者在
@@ -1996,16 +1999,34 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-layer-1)',
         overflow: 'hidden',
       },
-      tableScroll: { overflowX: 'auto', overflowY: 'visible' },
+      tableScroll: {
+        // 表头冻结（Excel 式）的关键：**纵向滚动必须发生在这个容器内部**。
+        //
+        // 原来写的是 `overflowY: 'visible'` —— 纵向滚动交给外层页面，
+        // 于是 `position: sticky; top: 0` 相对的是页面而不是这张表，
+        // 表头会随着整页滚走。headerRow 上的 sticky 一直是"设置了但不生效"。
+        //
+        // 改成容器自己滚（overflowY: 'auto'），sticky 才有意义。
+        // maxHeight 给一个视口相关的值：滚动条出现在表格内部，
+        // 表头钉在表格顶部不动，这就是 Excel 冻结首行的效果。
+        overflowX: 'auto',
+        overflowY: 'auto',
+        maxHeight: 'calc(100vh - 260px)',
+        // 让粘性表头的阴影不被容器裁掉
+        position: 'relative',
+      },
       headerRow: {
         display: 'grid',
         alignItems: 'stretch',
         minWidth: 1220,
         background: 'var(--dsw-alias-bg-layer-2)',
         borderBottom: '1px solid var(--dsw-alias-border-l1)',
+        // 冻结首行：容器内纵向滚动时表头不动。
         position: 'sticky',
         top: 0,
         zIndex: 3,
+        // 与内容之间加一条投影，滚起来才看得出"它是浮在上面的"
+        boxShadow: '0 2px 6px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent)',
       },
       headerCell: (align) => ({
         boxSizing: 'border-box',
