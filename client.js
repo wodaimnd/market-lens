@@ -1462,44 +1462,70 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 本次同步变化的三档徽章。
+     * 本次同步变化：三种状态改成**彩色小圆点**，不再用汉字徽章。
      *
-     * 三者以前都是同样的实心淡底，只有颜色不同。问题是「有变化」这一档最容易和
-     * 行内按钮上的「更新 ↑ x.y.z」混在一起读 —— 而它们是两件事：
-     *   徽章 = 本次同步这个条目变了
-     *   按钮 = 已装插件有新版本
+     * 为什么改：汉字徽章「新增 / 有变化 / 下架」每个都占 40-56px 宽，
+     * 而且和最需要扫读的插件名挤在同一行 —— 一屏十行有八行带徽章时，
+     * 名字反而被压成省略号。圆点只占 6px，靠颜色区分，悬停再给完整解释。
      *
-     * 所以 updated 用**描边**而不是实心：视觉上退到"提示"层级，
-     * 不与"可操作"的实心按钮抢注意力。added / removed 仍是实心（它们是真的状态变化，
-     * 值得醒目）。
+     * 三种状态靠**形状 + 颜色**双重区分（不只靠颜色，色盲也能读）：
+     *
+     *   added    实心绿点        新上架
+     *   updated  空心蓝环        条目有变化
+     *   removed  红色横线        已下架（横线本身就是"划掉"的含义）
      */
     const CHANGE_META = {
-      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)', variant: 'solid' },
-      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-brand-primary)', variant: 'outline' },
-      removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)', variant: 'solid' },
+      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)', shape: 'solid' },
+      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-brand-primary)', shape: 'ring' },
+      removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)', shape: 'strike' },
     }
 
-    /** 按 variant 渲染变化徽章。 */
+    /**
+     * 渲染变化标记。
+     *
+     * @param {object|null} change CHANGE_META 的条目
+     * @param {(key: string) => string} t
+     * @returns {object|null}
+     */
     function changeBadge(change, t) {
       if (!change) return null
-      const outline = change.variant === 'outline'
+      const base = {
+        flex: '0 0 auto',
+        display: 'inline-block',
+        cursor: 'help',
+        // 三种形状共享的尺寸：圆点 7px，横线 9x2
+        boxSizing: 'border-box',
+      }
+      const title = t(change.labelKey) + ' · ' + t('changeNote')
+
+      if (change.shape === 'strike') {
+        // 下架：一条红色短横 —— 不占宽度，且"划掉"的含义一眼就懂
+        return h('span', {
+          style: { ...base, width: 9, height: 2, borderRadius: 1, background: change.color, opacity: 0.85 },
+          title,
+        })
+      }
+      if (change.shape === 'ring') {
+        // 有变化：空心圆环。用环而非实心，是为了和"新增"的实心点分开 ——
+        // 两者都是"积极"信号，但"有变化"不值得抢"新增"的注意力。
+        return h('span', {
+          style: {
+            ...base, width: 7, height: 7, borderRadius: '50%',
+            border: '1.5px solid ' + change.color,
+            background: 'transparent',
+          },
+          title,
+        })
+      }
+      // 新增：实心点 + 淡光晕
       return h('span', {
         style: {
-          flex: '0 0 auto',
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: '1px 6px',
-          borderRadius: 999,
-          fontSize: 10.5,
-          lineHeight: 1.5,
-          whiteSpace: 'nowrap',
-          // 实心：淡色底 + 同色字；描边：透明底 + 同色边与字
-          background: outline ? 'transparent' : 'color-mix(in srgb, ' + change.color + ' 16%, transparent)',
-          border: '1px solid ' + (outline ? 'color-mix(in srgb, ' + change.color + ' 45%, transparent)' : 'transparent'),
-          color: change.color,
+          ...base, width: 7, height: 7, borderRadius: '50%',
+          background: change.color,
+          boxShadow: '0 0 0 2px color-mix(in srgb, ' + change.color + ' 20%, transparent)',
         },
-        title: t('changeNote'),
-      }, t(change.labelKey))
+        title,
+      })
     }
 
     /**
