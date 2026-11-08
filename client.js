@@ -635,9 +635,14 @@ window.__ModuleLoader__.load({
         // ---- 本次同步差异 ----
         change: '本次变化',
         changeAdded: '新增',
-        changeUpdated: '更新',
+        // 「更新」原来和行内按钮上的「更新」同名，两件事被读成一件：
+        //   · 这个徽章 = **本次同步时这个条目有变化**（版本/日期/描述）
+        //   · 按钮 = **已装插件有新版本可更新**
+        // 用户在截图里指着徽章问"更新提示怎么没变小圆点"，正是这个歧义造成的。
+        // 改成「有变化」，两个概念各自有自己的词。
+        changeUpdated: '有变化',
         changeRemoved: '下架',
-        changeNote: '新增 = 上一份目录里没有；更新 = 版本或更新日期变了；下架 = 本轮来源里已经没有它（只保留一代）。',
+        changeNote: '新增 = 上一份目录里没有；有变化 = 版本、更新日期或描述变了；下架 = 本轮来源里已经没有它（只保留一代）。注意「有变化」说的是目录条目，不是「已装插件有新版本」。',
         onlyChanged: '仅看本次变化',
         baselinedNote: '本地还没有上一份目录，这次不标差异；下次同步开始生效。',
         // ---- 安全优先视图 ----
@@ -1132,9 +1137,9 @@ window.__ModuleLoader__.load({
         incompatibleWarning: 'Incompatible plugins may crash or lose data. This panel is read-only and does not install anything.',
         change: 'This sync',
         changeAdded: 'New',
-        changeUpdated: 'Updated',
+        changeUpdated: 'Changed',
         changeRemoved: 'Delisted',
-        changeNote: 'New = absent from the previous catalog; Updated = version or update date changed; Delisted = no source returns it anymore (kept for one generation).',
+        changeNote: 'New = absent from the previous catalog; Changed = version, update date or description changed; Delisted = no source returns it anymore (kept for one generation). Note: "Changed" is about the catalog entry, not about a newer version of an installed plugin.',
         onlyChanged: 'Only this sync',
         baselinedNote: 'No previous catalog yet, so nothing is marked; this starts with the next sync.',
         safeView: 'Safe view',
@@ -1456,10 +1461,45 @@ window.__ModuleLoader__.load({
       return 'unknown'
     }
 
+    /**
+     * 本次同步变化的三档徽章。
+     *
+     * 三者以前都是同样的实心淡底，只有颜色不同。问题是「有变化」这一档最容易和
+     * 行内按钮上的「更新 ↑ x.y.z」混在一起读 —— 而它们是两件事：
+     *   徽章 = 本次同步这个条目变了
+     *   按钮 = 已装插件有新版本
+     *
+     * 所以 updated 用**描边**而不是实心：视觉上退到"提示"层级，
+     * 不与"可操作"的实心按钮抢注意力。added / removed 仍是实心（它们是真的状态变化，
+     * 值得醒目）。
+     */
     const CHANGE_META = {
-      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)' },
-      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-brand-primary)' },
-      removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)' },
+      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)', variant: 'solid' },
+      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-brand-primary)', variant: 'outline' },
+      removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)', variant: 'solid' },
+    }
+
+    /** 按 variant 渲染变化徽章。 */
+    function changeBadge(change, t) {
+      if (!change) return null
+      const outline = change.variant === 'outline'
+      return h('span', {
+        style: {
+          flex: '0 0 auto',
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '1px 6px',
+          borderRadius: 999,
+          fontSize: 10.5,
+          lineHeight: 1.5,
+          whiteSpace: 'nowrap',
+          // 实心：淡色底 + 同色字；描边：透明底 + 同色边与字
+          background: outline ? 'transparent' : 'color-mix(in srgb, ' + change.color + ' 16%, transparent)',
+          border: '1px solid ' + (outline ? 'color-mix(in srgb, ' + change.color + ' 45%, transparent)' : 'transparent'),
+          color: change.color,
+        },
+        title: t('changeNote'),
+      }, t(change.labelKey))
     }
 
     /**
@@ -3350,7 +3390,7 @@ window.__ModuleLoader__.load({
                 : null,
               h('span', { title: row.title || row.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.title || row.name),
               change
-                ? h('span', { style: { ...style.badge(change.color, true), flex: '0 0 auto' }, title: t('changeNote') }, t(change.labelKey))
+                ? changeBadge(change, t)
                 : null,
             ),
             h('div', { style: style.pluginSub, title: row.pkg || row.repo || '' }, row.pkg || row.repo || '—'),
