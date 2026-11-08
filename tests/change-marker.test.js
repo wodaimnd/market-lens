@@ -31,8 +31,8 @@ function changeBadgeBody() {
   return source.slice(start, end)
 }
 
-describe('CHANGE_META：三种状态各有形状', () => {
-  it('新增 = 实心点 / 有变化 = 空心环 / 下架 = 横线', () => {
+describe('CHANGE_META：三种状态各有形状标记', () => {
+  it('shape 只作为语义标记，三种状态都渲染成实心圆', () => {
     const start = source.indexOf('const CHANGE_META = {')
     assert.ok(start > 0)
     // 取到紧随其后的 `}` 行（三行条目 + 一行闭合）
@@ -59,33 +59,39 @@ describe('渲染输出必须是点，不是字', () => {
     assert.match(body, /t\('changeNote'\)/, 'title 要带完整说明')
   })
 
-  it('宽度不超过 10px', () => {
+  it('宽度不超过 8px', () => {
     const body = changeBadgeBody()
-    // 圆点是 7px，横线是 9px，都在 10 以内
-    assert.doesNotMatch(body, /width: (1[0-9]|[2-9][0-9]|1[0-9][0-9])/, '不能有超过 10px 的宽度')
-    assert.match(body, /width: 7/, '圆点应当是 7px')
-    assert.match(body, /width: 9/, '横线应当是 9px')
+    // 全部实心圆：新增 7px / 有变化 6px / 下架 4px
+    assert.doesNotMatch(body, /width: (8|[1-9][0-9])/, '不能有超过 7px 的宽度')
+    assert.match(body, /width: size/, '尺寸应当由 size 变量统一决定')
   })
 })
 
-describe('三种形状的视觉差异', () => {
-  it('实心点有背景色', () => {
+describe('三种状态都是实心圆，靠尺寸 + 颜色区分', () => {
+  it('全部用 borderRadius 50% + background（没有空心环）', () => {
     const body = changeBadgeBody()
-    // solid 分支结尾那段
-    const solidPart = body.slice(body.lastIndexOf('// 新增'))
-    assert.match(solidPart, /background: change\.color/)
+    assert.match(body, /borderRadius: '50%'/, '必须是圆')
+    assert.match(body, /background: change\.color/, '必须是实心填充')
+    assert.doesNotMatch(body, /background: 'transparent'/, '不能有空心（用户说圆环太难分辨）')
+    assert.doesNotMatch(body, /border: '1\.5px solid/, '不能有描边环')
   })
 
-  it('空心环用 border 而不是 background', () => {
+  it('尺寸分三档：新增 7px / 有变化 6px / 下架 4px', () => {
     const body = changeBadgeBody()
-    const ringPart = body.slice(body.indexOf("if (change.shape === 'ring')"), body.indexOf('// 新增'))
-    assert.match(ringPart, /border: .*change\.color/)
-    assert.match(ringPart, /background: 'transparent'/)
+    assert.match(body, /shape === 'solid' \? 7/, '新增 7px')
+    assert.match(body, /shape === 'ring' \? 6/, '有变化 6px')
+    assert.match(body, /: 4/, '下架 4px')
   })
 
-  it('下架横线的 height 是 2px（细线而非点）', () => {
+  it('下架用低透明度（"退场"感），其余全不透明', () => {
     const body = changeBadgeBody()
-    assert.match(body, /height: 2/, '横线要是 2px 高')
+    assert.match(body, /shape === 'strike' \? 0\.55 : 1/)
+  })
+
+  it('只有新增给光晕', () => {
+    const body = changeBadgeBody()
+    assert.match(body, /boxShadow: change\.shape === 'solid'/)
+    assert.match(body, /: 'none'/)
   })
 })
 

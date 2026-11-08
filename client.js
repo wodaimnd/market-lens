@@ -1479,11 +1479,16 @@ window.__ModuleLoader__.load({
      * 而且和最需要扫读的插件名挤在同一行 —— 一屏十行有八行带徽章时，
      * 名字反而被压成省略号。圆点只占 6px，靠颜色区分，悬停再给完整解释。
      *
-     * 三种状态靠**形状 + 颜色**双重区分（不只靠颜色，色盲也能读）：
+     * 三种状态**全部是实心圆**，只靠颜色 + 尺寸区分：
      *
-     *   added    实心绿点        新上架
-     *   updated  空心蓝环        条目有变化
-     *   removed  红色横线        已下架（横线本身就是"划掉"的含义）
+     *   added    7px 绿 + 光晕   新上架（最重）
+     *   updated  6px 橙          条目有变化（标准）
+     *   removed  4px 红 · 半透明 已下架（最小最弱）
+     *
+     * 为什么不用形状（空心环 / 横线）：用户实测「圆环太难分辨」。
+     * 7px 的环在密集表格里就是一个模糊小圈，和文字笔画混在一起；
+     * 实心点在任何背景、任何主题下都是清晰色块，扫读成本最低。
+     * 尺寸差异保住"不只靠颜色"这条 —— 色盲用户仍能靠大小分辨。
      *
      * ⚠️ 颜色必须用**语义色**（state-*），不能用 brand-primary。
      * 实测（dsh-client-ui-theme）：
@@ -1512,40 +1517,35 @@ window.__ModuleLoader__.load({
      */
     function changeBadge(change, t) {
       if (!change) return null
-      const base = {
-        flex: '0 0 auto',
-        display: 'inline-block',
-        cursor: 'help',
-        // 三种形状共享的尺寸：圆点 7px，横线 9x2
-        boxSizing: 'border-box',
-      }
       const title = t(change.labelKey) + ' · ' + t('changeNote')
 
-      if (change.shape === 'strike') {
-        // 下架：一条红色短横 —— 不占宽度，且"划掉"的含义一眼就懂
-        return h('span', {
-          style: { ...base, width: 9, height: 2, borderRadius: 1, background: change.color, opacity: 0.85 },
-          title,
-        })
-      }
-      if (change.shape === 'ring') {
-        // 有变化：空心圆环。用环而非实心，是为了和"新增"的实心点分开 ——
-        // 两者都是"积极"信号，但"有变化"不值得抢"新增"的注意力。
-        return h('span', {
-          style: {
-            ...base, width: 7, height: 7, borderRadius: '50%',
-            border: '1.5px solid ' + change.color,
-            background: 'transparent',
-          },
-          title,
-        })
-      }
-      // 新增：实心点 + 淡光晕
+      // 三种状态**全部用实心圆**，只靠颜色区分。
+      //
+      // 为什么放弃形状区分（空心环 / 横线）：用户实测说「圆环太难分辨」。
+      // 7px 的环在密集表格里就是一个模糊的小圈，和文字笔画混在一起；
+      // 实心点在任何背景、任何主题下都是清晰的色块，扫读成本最低。
+      //
+      // 形状差异用**尺寸**而不是轮廓表达，这样仍然不单靠颜色（色盲可读）：
+      //   新增   7px 实心 + 光晕（最重）
+      //   有变化 6px 实心（标准）
+      //   下架   4px 实心 + 低透明度（最小最弱，"退场"的感觉）
+      const size = change.shape === 'solid' ? 7 : change.shape === 'ring' ? 6 : 4
+      const opacity = change.shape === 'strike' ? 0.55 : 1
       return h('span', {
         style: {
-          ...base, width: 7, height: 7, borderRadius: '50%',
+          flex: '0 0 auto',
+          display: 'inline-block',
+          boxSizing: 'border-box',
+          cursor: 'help',
+          width: size,
+          height: size,
+          borderRadius: '50%',
           background: change.color,
-          boxShadow: '0 0 0 2px color-mix(in srgb, ' + change.color + ' 20%, transparent)',
+          opacity,
+          // 只有"新增"给光晕：它是唯一值得多看一眼的状态
+          boxShadow: change.shape === 'solid'
+            ? '0 0 0 2px color-mix(in srgb, ' + change.color + ' 20%, transparent)'
+            : 'none',
         },
         title,
       })
