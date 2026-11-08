@@ -38,6 +38,16 @@
     "client": {
       "platform": "web",
       "immediately": true
+    },
+    "forge": {
+      "source": "git:https://github.com/wodaimnd/market-lens",
+      "effects": [
+        "fs:write:workspace",
+        "net:https",
+        "child:git",
+        "env:read",
+        "fs:write:$DSH_HOME"
+      ]
     }
   },
   "repository": {
@@ -49,10 +59,11 @@
     "url": "https://github.com/wodaimnd/market-lens/issues"
   },
   "license": "MIT",
-  "author": "wodaimnd <woyi2333@gmail.com>",
+  "author": "Kewei Chen <wodaimnd@users.noreply.github.com>",
   "keywords": [
     "deepseek",
     "dsh",
-    "dsh-plugin"
+    "dsh-plugin",
+    "marketplace"
   ]
 }
