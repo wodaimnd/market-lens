@@ -1254,11 +1254,21 @@ export function apply(ctx) {
     const cached = readJson(updatesPath)
     if (!cached || cached.version !== CACHE_VERSION || !Array.isArray(cached.entries)) return
     for (const entry of cached.entries) updates.set(entry)
+    // 发布时间缓存一并恢复：那些 entry 里的 publishedAt 就是这么来的。
+    // 只恢复值非空的条目（见 restorePublished 的注释）。
+    updates.restorePublished(cached.published)
   }
 
   function saveUpdatesCache() {
     try {
-      writeJsonAtomic(updatesPath, { version: CACHE_VERSION, ...updates.status(), entries: updates.snapshot() })
+      writeJsonAtomic(updatesPath, {
+        version: CACHE_VERSION,
+        ...updates.status(),
+        entries: updates.snapshot(),
+        // 发布时间缓存一起落盘：不落的话每次重启都要为每个可更新包重拉 packument，
+        // 那是最贵的一类请求。发布时间一旦发布就不会变，缓存久一点是安全的。
+        published: updates.publishedSnapshot(),
+      })
     } catch (error) {
       // 更新检测结果只是提示：落盘失败不该让面板挂掉，但要在日志里留痕
       logger.warn?.('[market-lens] update cache persist failed: ' + message(error))
@@ -1316,6 +1326,32 @@ export function apply(ctx) {
     try {
       const items = await installedBundleItems()
       await updates.check(items, { force })
+
+      // 补查发布时间：让「有更新」的每个包都能算出新鲜度档位。
+      //
+      // 为什么放在这里而不是 resolve 里：走 compat 缓存那条路径的包，
+      // resolve 根本没被调用（它们的「最新版本」来自同步时已算好的 npm latest）。
+      // 那些包因此没有 publishedAt，界面上只能显示中性灰点。
+      //
+      // 这是低频操作（用户主动点「检查更新」），所以愿意为它多花几个请求。
+      // 只补**还没有缓存**的包；已经查过的 6 小时内不重复问。
+      //
+      // 失败不影响主流程：拿不到发布时间只是那几颗点变灰，不是错误。
+      const needsPublished = []
+      for (const entry of updates.snapshot()) {
+        if (!entry || !entry.available || !entry.to) continue
+        if (!updates.cachedPublishedAt(entry.pkg, entry.to)) {
+          needsPublished.push({ pkg: entry.pkg, version: entry.to })
+        }
+      }
+      if (needsPublished.length) {
+        const flushed = await updates.flushPublished(needsPublished)
+        logger?.info?.('[market-lens] published-at flush: filled=' + flushed.filled + ' skipped=' + flushed.skipped + ' failed=' + flushed.failed)
+        // 补到发布时间之后要重算行上的 update，否则界面还是旧的那份（没有 publishedAt）
+        saveUpdatesCache()
+        refreshUpdateOnRows()
+      }
+
       saveUpdatesCache()
       refreshUpdateOnRows()
     } catch (error) {
@@ -1665,9 +1701,10 @@ export function apply(ctx) {
       to: cached.version,
       source: 'npm',
       registry: null,
-      // compat 缓存里没有发布时间：走这条路径的包不会冒绿点。
-      // 这是保守的正确方向 —— 没证据就不抢注意力。
-      publishedAt: null,
+      // compat 缓存里没有发布时间，但 UpdateService 可能已经查过并缓存了
+      // （用户点过「检查更新」之后就会补上）。只读缓存、不发请求 ——
+      // 这个函数是同步的，每轮 catalog/status 都会跑。
+      publishedAt: updates.cachedPublishedAt ? updates.cachedPublishedAt(name, cached.version) : null,
       checkedAt: cached.checkedAt || null,
     }
   }
