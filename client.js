@@ -104,21 +104,32 @@ window.__ModuleLoader__.load({
      * 全是同一片灰字时根本扫不出来。给了颜色之后，用户能靠颜色一眼分出
      * "这是能力类 / 这是外观类 / 这是数据类"，不必逐行读字。
      *
-     * 配色原则（不是随便分配）：
-     *   · 语义分组 —— 相近的用途用同一色系，跨组才换色
-     *   · 全部走 dsw 的 alias 变量 —— 主题切换时自动跟随，不写死十六进制
-     *   · 同组内用 primary / secondary 区分强弱，避免颜色数量爆炸
+     * ⚠️ 只能用**语义色**（state-*），不能碰这两类：
+     *
+     *   brand-primary —— 亮色主题下 = #0f1115（近黑），暗色下 = bluish-50（浅白）。
+     *     它的职责是"与背景强对比"（按钮填充、焦点环），不是"可辨别的彩色"。
+     *     拿它当分类色，亮色主题下所有分类都是同一片黑。
+     *   label-tertiary / label-secondary —— 都是中性灰，同样分不出组。
+     *
+     * 实测可用的五种真彩（dsh-client-ui-theme/client.js）：
+     *   state-success-primary = #22c55e 绿
+     *   state-warn-primary    = #f59e0b 橙
+     *   state-error-primary   = #dc2626 红
+     *   state-done-primary    = violet-600 紫
+     *   state-business-primary= deepseek-500 品牌蓝
+     *
+     * 这五个不随主题明暗变，亮暗两套主题下都能一眼分辨。
      */
     const CATEGORY_COLORS = {
-      // 能力 / 工具类 —— 品牌蓝
-      tools: 'var(--dsw-alias-brand-primary)',
-      dev: 'var(--dsw-alias-brand-primary)',
-      data: 'var(--dsw-alias-brand-primary)',
-      remote: 'var(--dsw-alias-brand-primary)',
-      // 外观 / 界面类 —— 紫
-      ui: 'var(--dsw-alias-label-tertiary)',
-      theme: 'var(--dsw-alias-label-tertiary)',
-      client: 'var(--dsw-alias-label-tertiary)',
+      // 能力 / 工具类 —— 品牌蓝（"干活用的"）
+      tools: 'var(--dsw-alias-state-business-primary)',
+      dev: 'var(--dsw-alias-state-business-primary)',
+      data: 'var(--dsw-alias-state-business-primary)',
+      remote: 'var(--dsw-alias-state-business-primary)',
+      // 外观 / 界面类 —— 紫（"看的东西"）
+      ui: 'var(--dsw-alias-state-done-primary)',
+      theme: 'var(--dsw-alias-state-done-primary)',
+      client: 'var(--dsw-alias-state-done-primary)',
       // 内容 / 知识类 —— 绿
       skill: 'var(--dsw-alias-state-success-primary)',
       memory: 'var(--dsw-alias-state-success-primary)',
@@ -126,12 +137,12 @@ window.__ModuleLoader__.load({
       resource: 'var(--dsw-alias-state-success-primary)',
       content: 'var(--dsw-alias-state-success-primary)',
       search: 'var(--dsw-alias-state-success-primary)',
-      // 编排 / 智能体类 —— 青
+      // 编排 / 智能体类 —— 橙
       agent: 'var(--dsw-alias-state-warn-primary)',
       agents: 'var(--dsw-alias-state-warn-primary)',
       workflow: 'var(--dsw-alias-state-warn-primary)',
       model: 'var(--dsw-alias-state-warn-primary)',
-      // 集成 / 通知类 —— 橙
+      // 集成 / 通知类 —— 橙（与编排同色系，但这两类常一起出现，靠列分组区分）
       notify: 'var(--dsw-alias-state-warn-primary)',
       channel: 'var(--dsw-alias-state-warn-primary)',
       office: 'var(--dsw-alias-state-warn-primary)',
@@ -1473,10 +1484,22 @@ window.__ModuleLoader__.load({
      *   added    实心绿点        新上架
      *   updated  空心蓝环        条目有变化
      *   removed  红色横线        已下架（横线本身就是"划掉"的含义）
+     *
+     * ⚠️ 颜色必须用**语义色**（state-*），不能用 brand-primary。
+     * 实测（dsh-client-ui-theme）：
+     *   --dsw-alias-state-success-primary = var(--dsw-static-green-500) = #22c55e  ✅ 真绿
+     *   --dsw-alias-brand-primary 暗色主题 = var(--dsw-static-neutral-bluish-1000) = #0f1115  ❌ 近黑
+     *
+     * 这正是 0.17.4 那次"怎么都是黑色的"的真因：变化标记用了 brand-primary，
+     * 在暗色主题下画出来是 #0f1115 —— 一颗几乎纯黑的环。
+     *
+     * 语义色不会随"品牌色"变：绿色就是绿，红色就是红，与主题明暗无关。
      */
     const CHANGE_META = {
       added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)', shape: 'solid' },
-      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-brand-primary)', shape: 'ring' },
+      // 「有变化」用 warn 橙而不是 brand 蓝：brand 在暗色下是近黑，
+      // 而 warn 是真正的橙黄，暗亮两套主题都读得出来。
+      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-state-warn-primary)', shape: 'ring' },
       removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)', shape: 'strike' },
     }
 

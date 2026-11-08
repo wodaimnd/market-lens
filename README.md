@@ -61,6 +61,73 @@ DSH Desktop 已经内置了两个市场能力，先说清楚，避免重复造�
 
 一句话：**内置市场是“商店”，本插件是“比价表 + 直达安装”**。要按用户数、评分、更新时间、DSH 版本横切比较，导出 CSV，盯着“这周新上了哪些”，或者比较完直接点「装」，都用雷达。
 
+## 0.17.5：brand-primary 不是彩色，是「与背景强对比」
+
+### 事故
+
+用户说：
+
+> 怎么都是黑色的，不是按时间设了区分度吗
+
+截图里名字旁是一圈**黑环**。查 `dsh-client-ui-theme` 的真实值：
+
+```
+--dsw-alias-brand-primary 亮色主题 = var(--dsw-static-neutral-bluish-1000) = #0f1115   ← 近黑
+--dsw-alias-brand-primary 暗色主题 = var(--dsw-static-neutral-bluish-50)                ← 近白
+```
+
+**它的职责是「与背景强对比」**——按钮填充、焦点环用它是对的（黑底白字）。
+
+**但它不是「可辨别的彩色」。** 0.17.4 我拿它当变化标记的颜色，于是亮色主题下画出 `#0f1115` 的一颗环；分类色里「能力/工具类」四个分类也全是同一片黑。
+
+### 真正的彩色只有语义色
+
+| 变量 | 值 | 随主题变？ |
+| --- | --- | --- |
+| `state-success-primary` | `#22c55e` 绿 | 否 |
+| `state-warn-primary` | `#f59e0b` 橙 | 否 |
+| `state-error-primary` | `#dc2626` 红 | 否 |
+| `state-done-primary` | violet-600 紫 | 否 |
+| `state-business-primary` | deepseek-500 蓝 | 否 |
+
+### 修法
+
+**1. 变化标记「有变化」从 brand 蓝改成 warn 橙**
+
+`brand` 在亮色下是近黑，`warn` 是真的橙黄，两套主题都读得出来。
+
+**2. 分类色全部换成语义色**
+
+| 组 | 颜色 | 分类 |
+| --- | --- | --- |
+| 能力/工具 | business 蓝 | tools / dev / data / remote |
+| 外观/界面 | **done 紫**（原先是中性灰，根本分不出） | ui / theme / client |
+| 内容/知识 | success 绿 | skill / memory / docs / resource / content / search |
+| 编排/集成 | warn 橙 | agent / agents / workflow / model / notify / channel / office / productivity |
+| 运维/安全 | error 红 | security / market |
+
+原先「外观/界面」用 `label-tertiary`（中性灰）—— 和正文文字几乎同色，等于没上色。
+
+**3. 加回归测试防复发**
+
+`tests/theme-colors.test.js` 9 条，钉住：
+
+- `CATEGORY_COLORS` / `CHANGE_META` / `updateDotStyle` 里**不许出现** `brand-primary`
+- 分类至少用到 4 种不同语义色
+- 两个表都**不许写死十六进制**（否则主题切换失控）
+- 同时确认 `buttonStyle` **仍应**用 `brand-primary`（它的本职）
+
+### 教训
+
+「主题色变量」有两类，用途完全不同：
+
+- **强对比色**（brand / label-*）—— 随明暗反转，用于填充、边框、文字
+- **语义色**（state-*）—— 固定不变，用于状态表达
+
+混用就会在其中一个主题下"消失"。这次是在亮色主题下消失成黑色。
+
+---
+
 ## 0.17.4：变化标记也改成点——名字该是这一行的主体
 
 ### 我 0.17.3 会错意了

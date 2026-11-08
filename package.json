@@ -1,6 +1,6 @@
 {
   "name": "@local/market-lens",
-  "version": "0.17.4",
+  "version": "0.17.5",
   "private": true,
   "type": "module",
   "description": "DSH plugin market radar: aggregates 1024Store, dshfind, dsh.so, dshmarketplace and custom catalogs, checks DSH runtime compatibility from npm metadata, and offers Excel-like filtering in real desktop-style windows, resizable columns, scheduled refresh, installed-plugin update checks that never probe local/link installs, per-sync change badges, a security-first view, persistent page state, a runtime operation log for install troubleshooting, importable/exportable source config, and a scoring-rule library with dropdown selection and a documented template.",
