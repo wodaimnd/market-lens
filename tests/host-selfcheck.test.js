@@ -92,6 +92,37 @@ test('更新检查跳过 link:/@local 包，selfcheck 给出可复制的现场�
     },
   }
 
+  // 拦掉 fetch：0.17.2 起 startUpdateCheck 会为「可更新但还没 publishedAt」的包
+  // 补查一次发布时间（拉 registry packument）。测试里不能真发这个请求 ——
+  // 既慢又依赖网络，会让 assertion 忽快忽慢。
+  //
+  // 这里返回一个带 time 表的假 packument，让 publishedAt 能算出来，
+  // 顺带把「补查链路」也跑通了（而不是靠超时跳过）。
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || ''
+    if (url.includes('registry.npmjs.org')) {
+      return {
+        ok: true,
+        status: 200,
+        url,
+        headers: { get: () => null },
+        text: async () => JSON.stringify({
+          name: 'alpha-pkg',
+          'dist-tags': { latest: '1.1.0' },
+          time: { '1.1.0': '2026-11-08T00:00:00.000Z' },
+          versions: { '1.1.0': { version: '1.1.0' } },
+        }),
+        json: async () => ({
+          name: 'alpha-pkg',
+          'dist-tags': { latest: '1.1.0' },
+          time: { '1.1.0': '2026-11-08T00:00:00.000Z' },
+        }),
+      }
+    }
+    return realFetch(input)
+  }
+
   const handlers = new Map()
   const ctx = {
     logger: { info() {}, warn() {}, error() {}, debug() {} },
@@ -129,7 +160,16 @@ test('更新检查跳过 link:/@local 包，selfcheck 给出可复制的现场�
   try {
     await call({ op: 'updates.check', force: true })
     let entries = []
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    // 等待窗口要覆盖 `check` **加上后续的 flushPublished**。
+    //
+    // 0.17.2 起 startUpdateCheck 在 check 之后还会补查发布时间
+    // （为每个「可更新但还没有 publishedAt」的包拉一次 registry packument）。
+    // 那个补充请求可能耗时 1-3 秒，原来的 40×50ms=2s 窗口会刚好卡在边界 ——
+    // 表现为间歇性失败（10 次里中 1-2 次），而不是稳定红。
+    //
+    // 现在放宽到 120×50ms=6s：足够覆盖最慢的那条路径，又不会让真挂的情况
+    // 沉默太久（还是会超时报错，不是无限等）。
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       const response = await call({ op: 'updates' })
       entries = response.body.entries || []
       if (entries.length >= 2 && response.body.status && response.body.status.running === false) break
@@ -160,6 +200,7 @@ test('更新检查跳过 link:/@local 包，selfcheck 给出可复制的现场�
     assert.equal(typeof body.paths.cache, 'string')
     assert.equal(body.cache.rows, 1)
   } finally {
+    globalThis.fetch = realFetch
     fs.rmSync(home, { recursive: true, force: true })
     for (const [name, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[name]

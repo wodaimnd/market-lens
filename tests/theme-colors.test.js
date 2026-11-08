@@ -71,10 +71,11 @@ describe('变化标记只能用语义色', () => {
     assert.doesNotMatch(body, /--dsw-alias-brand-primary/)
   })
 
-  it('三种状态各用一种语义色（绿 / 橙 / 红）', () => {
+  it('三种状态各用一种语义色（新增橙 / 有变化绿 / 下架红）', () => {
     const body = block('const CHANGE_META = {')
-    assert.match(body, /added:[\s\S]{0,140}state-success-primary/)
-    assert.match(body, /updated:[\s\S]{0,140}state-warn-primary/)
+    // 0.17.7 起两档对调：新增用橙（更醒目），有变化用绿（最常见、最不刺眼）
+    assert.match(body, /added:[\s\S]{0,140}state-warn-primary/)
+    assert.match(body, /updated:[\s\S]{0,140}state-success-primary/)
     assert.match(body, /removed:[\s\S]{0,140}state-error-primary/)
   })
 })

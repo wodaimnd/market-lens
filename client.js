@@ -1501,10 +1501,11 @@ window.__ModuleLoader__.load({
      * 语义色不会随"品牌色"变：绿色就是绿，红色就是红，与主题明暗无关。
      */
     const CHANGE_META = {
-      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-success-primary)', shape: 'solid' },
-      // 「有变化」用 warn 橙而不是 brand 蓝：brand 在暗色下是近黑，
-      // 而 warn 是真正的橙黄，暗亮两套主题都读得出来。
-      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-state-warn-primary)', shape: 'ring' },
+      // 新增 = 橙：真正"新东西"值得醒目一点，橙比绿更抓眼。
+      added: { labelKey: 'changeAdded', color: 'var(--dsw-alias-state-warn-primary)', shape: 'solid' },
+      // 有变化 = 绿：这一档在整张表里最常见，用最不刺眼的绿才不会看累。
+      // （两档对调过：原来是 新增绿 / 有变化橙。）
+      updated: { labelKey: 'changeUpdated', color: 'var(--dsw-alias-state-success-primary)', shape: 'ring' },
       removed: { labelKey: 'changeRemoved', color: 'var(--dsw-alias-state-error-primary)', shape: 'strike' },
     }
 
