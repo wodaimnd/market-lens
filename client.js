@@ -347,6 +347,10 @@ window.__ModuleLoader__.load({
         settingsReadme: '查看插件说明（README）',
         settingsReadmeHint: '完整的功能清单、安装可靠性说明与已知限制都在 README 里。',
         subtitleShort: '首次使用：先同步一次市场目录。',
+        updateFreshToday: '今天发布（{days} 天前）',
+        updateFreshWeek: '{days} 天前发布',
+        updateFreshOld: '{days} 天前发布，即将不再提示',
+        updateFreshUnknown: '有更新，但不知道发布时间',
         settingsRefresh: '刷新计划',
         settingsColumns: '表格列',
         settingsTransfer: '配置导入导出',
@@ -841,6 +845,10 @@ window.__ModuleLoader__.load({
         settingsReadme: 'Open the README',
         settingsReadmeHint: 'The full feature list, install-reliability notes and known limits live in the README.',
         subtitleShort: 'First run: sync the catalog once.',
+        updateFreshToday: 'Published {days} day(s) ago — fresh',
+        updateFreshWeek: 'Published {days} days ago',
+        updateFreshOld: 'Published {days} days ago — stops showing soon',
+        updateFreshUnknown: 'Update available, publish date unknown',
         settingsRefresh: 'Refresh schedule',
         settingsColumns: 'Table columns',
         settingsTransfer: 'Config import/export',
@@ -1474,27 +1482,115 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 「这次更新值不值得在名字旁边冒头」。
+     * 更新的「新鲜度分级」——决定名字旁那颗点的颜色深浅。
      *
-     * 判据是**最近一周内**有人发布过新版本 —— 看 `update.publishedAt`
-     * （有就用它，没有就退回 `checkedAt`，那是"我们确认过这个版本存在"的时间，
-     * 比完全不判更可信；两个都没有时**不亮**，因为没有证据说它新鲜）。
+     * 需求（用户原话）：所有可更新都亮，只是颜色深浅不同，时间越近越亮。
+     * 分四档，超过一周不再提示：
      *
-     * 为什么不直接用 checkedAt 当默认：checkedAt 是本地轮询时间，
-     * 每刷新一次都会变"现在"，用它当新鲜度会让每个可更新包都永远亮着 ——
-     * 那正是这次要修的问题。
+     *   tracked  ≤ 1 天   最亮（实心 + 外发光）
+     *   recent   ≤ 6 天   亮
+     *   fading   ≤ 7 天   暗
+     *   （超过 7 天 → 不提示，按钮上仍写 ↑ x.y.z）
      *
-     * 超过一周的仍算"可更新"（按钮照样写 ↑ x.y.z），只是不抢注意力。
+     * 判据是 `update.publishedAt` —— 目标版本在 registry 上的**发布时间**。
+     * 绝不用 `checkedAt`：那是本地轮询时间，每次刷新都变成"现在"，
+     * 用它当新鲜度等于没有判据，每个包都会永远最亮。
+     *
+     * 拿不到发布时间时返回 `'unknown'`：**仍然亮**（因为用户要求"所有可更新都亮"），
+     * 用中性灰点表示"有更新，但不知道多新"——不假装它新鲜，也不把它藏掉。
      */
-    const FRESH_UPDATE_MS = 7 * 24 * 60 * 60 * 1000
-    function isFreshUpdate(update, now = Date.now()) {
-      if (!update) return false
-      const stamp = update.publishedAt || update.releasedAt || null
-      if (!stamp) return false
-      const at = Date.parse(stamp)
-      if (!Number.isFinite(at)) return false
-      return now - at <= FRESH_UPDATE_MS
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const FRESH_TIERS = {
+      tracked: { maxAgeMs: 1 * DAY_MS, ageKey: 'updateFreshToday' },
+      recent: { maxAgeMs: 6 * DAY_MS, ageKey: 'updateFreshWeek' },
+      fading: { maxAgeMs: 7 * DAY_MS, ageKey: 'updateFreshOld' },
     }
+
+    /**
+     * @param {object|null} update
+     * @param {number} [now]
+     * @returns {{tier: 'tracked'|'recent'|'fading'|'stale'|'unknown', ageMs: number|null, publishedAt: string|null}}
+     */
+    function updateFreshness(update, now = Date.now()) {
+      const unknown = { tier: 'unknown', ageMs: null, publishedAt: null }
+      if (!update) return { tier: 'stale', ageMs: null, publishedAt: null }
+      const stamp = update.publishedAt || update.releasedAt || null
+      if (!stamp) return unknown
+      const at = Date.parse(stamp)
+      if (!Number.isFinite(at)) return unknown
+      const ageMs = Math.max(0, now - at)
+      const publishedAt = stamp
+      if (ageMs <= FRESH_TIERS.tracked.maxAgeMs) return { tier: 'tracked', ageMs, publishedAt }
+      if (ageMs <= FRESH_TIERS.recent.maxAgeMs) return { tier: 'recent', ageMs, publishedAt }
+      if (ageMs <= FRESH_TIERS.fading.maxAgeMs) return { tier: 'fading', ageMs, publishedAt }
+      return { tier: 'stale', ageMs, publishedAt }
+    }
+
+    /** 点还在不在：stale 不画，其余都画（含 unknown）。 */
+    const shouldShowUpdateDot = (update, now = Date.now()) => {
+      const { tier } = updateFreshness(update, now)
+      return tier !== 'stale'
+    }
+
+    /**
+     * 四种点各自的视觉。颜色统一用 success 绿，只改**亮度**与外围光晕 ——
+     * "越近越亮"用同一色系的强弱表达，比换颜色更符合直觉（换色会被读成不同类型）。
+     *
+     *   tracked  实心亮绿 + 双层光晕
+     *   recent   实心绿 + 单层光晕
+     *   fading   半透明绿 + 细边
+     *   unknown  中性灰（有更新但不知道多新）
+     */
+    function updateDotStyle(freshness) {
+      const dot = { flex: '0 0 auto', width: 7, height: 7, borderRadius: '50%', cursor: 'help' }
+      switch (freshness.tier) {
+        case 'tracked':
+          return {
+            ...dot,
+            background: 'var(--dsw-alias-state-success-primary)',
+            boxShadow: '0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary) 34%, transparent), 0 0 6px color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, transparent)',
+          }
+        case 'recent':
+          return {
+            ...dot,
+            background: 'var(--dsw-alias-state-success-primary)',
+            boxShadow: '0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent)',
+          }
+        case 'fading':
+          return {
+            ...dot,
+            background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent)',
+            boxSizing: 'border-box',
+          }
+        case 'unknown':
+        default:
+          return {
+            ...dot,
+            background: 'var(--dsw-alias-label-tertiary)',
+            boxShadow: '0 0 0 2px color-mix(in srgb, var(--dsw-alias-label-tertiary) 20%, transparent)',
+          }
+      }
+    }
+
+    /** 新鲜度的中文/英文说明，拼进 tooltip。 */
+    function freshnessLabel(freshness, t) {
+      switch (freshness.tier) {
+        case 'tracked':
+        case 'recent':
+        case 'fading': {
+          const config = FRESH_TIERS[freshness.tier]
+          const days = freshness.ageMs == null ? null : Math.floor(freshness.ageMs / DAY_MS)
+          const key = config.ageKey
+          return days == null ? t(key) : t(key).replace('{days}', String(days))
+        }
+        case 'unknown':
+          return t('updateFreshUnknown')
+        default:
+          return null
+      }
+    }
+
 
     /** 更新徽标的 tooltip：版本对、差异级别、来源、检测时间，四件事都要能看见。 */
     function updateBadgeTitle(update, t) {
@@ -3233,24 +3329,23 @@ window.__ModuleLoader__.load({
         if (column.key === 'name') {
           const change = CHANGE_META[row.change] || null
           const update = row.update && row.update.available ? row.update : null
-          // 「更新」不再是一块写着汉字的徽章，而是一个绿色圆点：
-          //   · 汉字徽章占宽度、反复出现会淹没真正的插件名
-          //   · 圆点靠颜色就能扫读，悬停再给完整解释
-          // 而且只在**最近一周内**真有更新时才亮 —— 三个月前的旧版本不配抢注意力。
-          // 超过一周的仍算「可更新」（按钮仍写 ↑ x.y.z），只是不在名字旁边冒头。
-          const freshUpdate = update && isFreshUpdate(update) ? update : null
+          // 更新提示是**一颗点**，不是一块写着"更新"的徽章：
+          //   · 汉字徽章占宽度，反复出现会淹没真正的插件名
+          //   · 点靠颜色与亮度就能扫读，悬停再给完整解释
+          //
+          // 分级按发布时间（越近越亮）：≤1天 最亮 / ≤6天 亮 / ≤7天 暗 / >7天 不提示。
+          // 拿不到发布时间仍然亮（中性灰）—— 用户要的是"所有可更新都能看见"。
+          const freshness = update ? updateFreshness(update) : null
+          const showDot = Boolean(update) && shouldShowUpdateDot(update)
           return h(React.Fragment, null,
             h('div', { style: { ...style.pluginTitle, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 } },
-              freshUpdate
+              showDot
                 ? h('span', {
                     className: 'ml-update-dot',
-                    style: {
-                      flex: '0 0 auto', width: 7, height: 7, borderRadius: '50%',
-                      background: 'var(--dsw-alias-state-success-primary)',
-                      boxShadow: '0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent)',
-                      cursor: 'help',
-                    },
-                    title: updateBadgeTitle(update, t),
+                    'data-freshness': freshness.tier,
+                    style: updateDotStyle(freshness),
+                    title: updateBadgeTitle(update, t) +
+                      (freshnessLabel(freshness, t) ? ' · ' + freshnessLabel(freshness, t) : ''),
                   })
                 : null,
               h('span', { title: row.title || row.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.title || row.name),
