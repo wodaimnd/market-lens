@@ -97,7 +97,62 @@ window.__ModuleLoader__.load({
       other: { zh: '其他', en: 'Other' },
     }
 
+    /**
+     * 分类 → 颜色。
+     *
+     * 为什么不用单一灰：这张表一屏 10 行、29 种分类，"界面增强 / 技能包 / 记忆"
+     * 全是同一片灰字时根本扫不出来。给了颜色之后，用户能靠颜色一眼分出
+     * "这是能力类 / 这是外观类 / 这是数据类"，不必逐行读字。
+     *
+     * 配色原则（不是随便分配）：
+     *   · 语义分组 —— 相近的用途用同一色系，跨组才换色
+     *   · 全部走 dsw 的 alias 变量 —— 主题切换时自动跟随，不写死十六进制
+     *   · 同组内用 primary / secondary 区分强弱，避免颜色数量爆炸
+     */
+    const CATEGORY_COLORS = {
+      // 能力 / 工具类 —— 品牌蓝
+      tools: 'var(--dsw-alias-brand-primary)',
+      dev: 'var(--dsw-alias-brand-primary)',
+      data: 'var(--dsw-alias-brand-primary)',
+      remote: 'var(--dsw-alias-brand-primary)',
+      // 外观 / 界面类 —— 紫
+      ui: 'var(--dsw-alias-label-tertiary)',
+      theme: 'var(--dsw-alias-label-tertiary)',
+      client: 'var(--dsw-alias-label-tertiary)',
+      // 内容 / 知识类 —— 绿
+      skill: 'var(--dsw-alias-state-success-primary)',
+      memory: 'var(--dsw-alias-state-success-primary)',
+      docs: 'var(--dsw-alias-state-success-primary)',
+      resource: 'var(--dsw-alias-state-success-primary)',
+      content: 'var(--dsw-alias-state-success-primary)',
+      search: 'var(--dsw-alias-state-success-primary)',
+      // 编排 / 智能体类 —— 青
+      agent: 'var(--dsw-alias-state-warn-primary)',
+      agents: 'var(--dsw-alias-state-warn-primary)',
+      workflow: 'var(--dsw-alias-state-warn-primary)',
+      model: 'var(--dsw-alias-state-warn-primary)',
+      // 集成 / 通知类 —— 橙
+      notify: 'var(--dsw-alias-state-warn-primary)',
+      channel: 'var(--dsw-alias-state-warn-primary)',
+      office: 'var(--dsw-alias-state-warn-primary)',
+      productivity: 'var(--dsw-alias-state-warn-primary)',
+      // 运维 / 安全类 —— 红（这两类出事代价高，给最醒目的色）
+      security: 'var(--dsw-alias-state-error-primary)',
+      market: 'var(--dsw-alias-state-error-primary)',
+      // 其余 —— 中性
+      session: 'var(--dsw-alias-label-secondary)',
+      browser: 'var(--dsw-alias-label-secondary)',
+      vision: 'var(--dsw-alias-label-secondary)',
+      creator: 'var(--dsw-alias-label-secondary)',
+      fun: 'var(--dsw-alias-label-secondary)',
+      other: 'var(--dsw-alias-label-secondary)',
+    }
+
+    /** 分类颜色；未知分类给中性色，不编造。 */
+    const categoryColor = (key) => CATEGORY_COLORS[String(key || 'other')] || 'var(--dsw-alias-label-secondary)'
+
     const COMPAT_ORDER = ['ok', 'bad', 'none', 'unknown', 'pending', 'no-package']
+
     const COMPAT_COLORS = {
       ok: 'var(--dsw-alias-state-success-primary)',
       bad: 'var(--dsw-alias-state-error-primary)',
@@ -287,6 +342,11 @@ window.__ModuleLoader__.load({
         customVerdictHint: '目标会先过一遍白名单（包名 / github:owner/repo / GitHub 地址），再交给官方插件管理器执行；这里不做人工审核。',
         settingsTitle: '设置',
         settingsIntro: '刷新计划、表格外观、配置导入导出，以及这个插件自身的信息。',
+        settingsAbout: '关于这个插件',
+        settingsAboutBody: '聚合 DSH 1024Store、dshfind、dsh.so、dshmarketplace 与自定义目录源，按用户数、评分、更新日期和 DSH 兼容性做 Excel 式多重筛选，并支持行内一键安装。',
+        settingsReadme: '查看插件说明（README）',
+        settingsReadmeHint: '完整的功能清单、安装可靠性说明与已知限制都在 README 里。',
+        subtitleShort: '首次使用：先同步一次市场目录。',
         settingsRefresh: '刷新计划',
         settingsColumns: '表格列',
         settingsTransfer: '配置导入导出',
@@ -776,6 +836,11 @@ window.__ModuleLoader__.load({
         customVerdictHint: 'The target is checked against a whitelist (package name / github:owner/repo / GitHub URL) and then handed to the official plugin manager; there is no manual review here.',
         settingsTitle: 'Settings',
         settingsIntro: 'Refresh schedule, table appearance, config import/export, and information about this plugin itself.',
+        settingsAbout: 'About this plugin',
+        settingsAboutBody: 'Aggregates DSH 1024Store, dshfind, dsh.so, dshmarketplace and custom catalogs, then filters like Excel by users, rating, update date and DSH compatibility — with one-click inline install.',
+        settingsReadme: 'Open the README',
+        settingsReadmeHint: 'The full feature list, install-reliability notes and known limits live in the README.',
+        subtitleShort: 'First run: sync the catalog once.',
         settingsRefresh: 'Refresh schedule',
         settingsColumns: 'Table columns',
         settingsTransfer: 'Config import/export',
@@ -1408,6 +1473,29 @@ window.__ModuleLoader__.load({
       return { ...base, tier: 'unknown', safe: false, reason: 'unaudited' }
     }
 
+    /**
+     * 「这次更新值不值得在名字旁边冒头」。
+     *
+     * 判据是**最近一周内**有人发布过新版本 —— 看 `update.publishedAt`
+     * （有就用它，没有就退回 `checkedAt`，那是"我们确认过这个版本存在"的时间，
+     * 比完全不判更可信；两个都没有时**不亮**，因为没有证据说它新鲜）。
+     *
+     * 为什么不直接用 checkedAt 当默认：checkedAt 是本地轮询时间，
+     * 每刷新一次都会变"现在"，用它当新鲜度会让每个可更新包都永远亮着 ——
+     * 那正是这次要修的问题。
+     *
+     * 超过一周的仍算"可更新"（按钮照样写 ↑ x.y.z），只是不抢注意力。
+     */
+    const FRESH_UPDATE_MS = 7 * 24 * 60 * 60 * 1000
+    function isFreshUpdate(update, now = Date.now()) {
+      if (!update) return false
+      const stamp = update.publishedAt || update.releasedAt || null
+      if (!stamp) return false
+      const at = Date.parse(stamp)
+      if (!Number.isFinite(at)) return false
+      return now - at <= FRESH_UPDATE_MS
+    }
+
     /** 更新徽标的 tooltip：版本对、差异级别、来源、检测时间，四件事都要能看见。 */
     function updateBadgeTitle(update, t) {
       if (!update) return ''
@@ -1598,20 +1686,48 @@ window.__ModuleLoader__.load({
       '.ml-clamp-full::after { display: none; }',
     ].join('\n')
 
-    const buttonStyle = (primary, disabled, small) => ({
-      appearance: 'none',
-      border: '1px solid ' + (primary ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)'),
-      borderRadius: small ? 6 : 8,
-      padding: small ? '4px 9px' : '6px 12px',
-      fontFamily: 'inherit',
-      fontSize: small ? 12 : 13,
-      lineHeight: 1.4,
-      cursor: disabled ? 'not-allowed' : 'pointer',
-      opacity: disabled ? 0.55 : 1,
-      background: primary ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-bg-layer-1)',
-      color: primary ? 'var(--dsw-alias-bg-base)' : 'var(--dsw-alias-label-secondary)',
-      whiteSpace: 'nowrap',
-    })
+    /**
+     * 按钮的三档视觉：主操作 / 次操作 / 危险操作。
+     *
+     * 原来的问题：primary 用 brand 填充（还行），但**次要按钮是 bg-layer-1**，
+     * 而那正是页面底色附近的层级 —— 按钮边框和背景几乎一样，
+     * 用户得先"找到"按钮才能点。这次把次要按钮抬到 layer-2 并给实边框，
+     * 主操作保持 brand 填充 + 略强的阴影，让它在任何背景上都跳出来。
+     *
+     * `tone` 可选 'danger'：删除、强制重装这类不可逆动作用红边红字，
+     * 避免和普通"取消"混在一起。
+     */
+    const buttonStyle = (primary, disabled, small, tone) => {
+      const danger = tone === 'danger'
+      const border = danger
+        ? 'var(--dsw-alias-state-error-primary)'
+        : (primary ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l2)')
+      // 主操作：brand 实心 + 细阴影（hover 时阴影加深，见 onMouseEnter 省略处）
+      // 次操作：layer-2 实底 —— 比页面底色高一层，边界才看得见
+      const background = danger
+        ? 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)'
+        : (primary ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-bg-layer-2)')
+      const color = danger
+        ? 'var(--dsw-alias-state-error-primary)'
+        : (primary ? 'var(--dsw-alias-bg-base)' : 'var(--dsw-alias-label-primary)')
+      return {
+        appearance: 'none',
+        border: '1px solid ' + border,
+        borderRadius: small ? 6 : 8,
+        padding: small ? '4px 9px' : '6px 12px',
+        fontFamily: 'inherit',
+        fontSize: small ? 12 : 13,
+        lineHeight: 1.4,
+        fontWeight: primary ? 600 : 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        background,
+        color,
+        whiteSpace: 'nowrap',
+        boxShadow: primary ? '0 1px 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent)' : 'none',
+        transition: 'background 120ms ease, border-color 120ms ease, box-shadow 120ms ease',
+      }
+    }
 
     const style = {
       page: {
@@ -1644,8 +1760,11 @@ window.__ModuleLoader__.load({
       tab: (active) => ({
         appearance: 'none',
         border: 'none',
+        // 选中态从「只有一条 2px 下划线」加到底色块 + 下划线：
+        // 七个页签并排时，只靠一条细线很难一眼看出当前在哪一页。
         borderBottom: active ? '2px solid var(--dsw-alias-brand-primary)' : '2px solid transparent',
-        background: 'transparent',
+        background: active ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)' : 'transparent',
+        borderRadius: '6px 6px 0 0',
         padding: '7px 10px',
         fontFamily: 'inherit',
         fontSize: 13,
@@ -3114,21 +3233,29 @@ window.__ModuleLoader__.load({
         if (column.key === 'name') {
           const change = CHANGE_META[row.change] || null
           const update = row.update && row.update.available ? row.update : null
+          // 「更新」不再是一块写着汉字的徽章，而是一个绿色圆点：
+          //   · 汉字徽章占宽度、反复出现会淹没真正的插件名
+          //   · 圆点靠颜色就能扫读，悬停再给完整解释
+          // 而且只在**最近一周内**真有更新时才亮 —— 三个月前的旧版本不配抢注意力。
+          // 超过一周的仍算「可更新」（按钮仍写 ↑ x.y.z），只是不在名字旁边冒头。
+          const freshUpdate = update && isFreshUpdate(update) ? update : null
           return h(React.Fragment, null,
             h('div', { style: { ...style.pluginTitle, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 } },
+              freshUpdate
+                ? h('span', {
+                    className: 'ml-update-dot',
+                    style: {
+                      flex: '0 0 auto', width: 7, height: 7, borderRadius: '50%',
+                      background: 'var(--dsw-alias-state-success-primary)',
+                      boxShadow: '0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent)',
+                      cursor: 'help',
+                    },
+                    title: updateBadgeTitle(update, t),
+                  })
+                : null,
               h('span', { title: row.title || row.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.title || row.name),
               change
                 ? h('span', { style: { ...style.badge(change.color, true), flex: '0 0 auto' }, title: t('changeNote') }, t(change.labelKey))
-                : null,
-              update
-                ? h('span', {
-                    style: {
-                      ...style.badge(update.kind === 'major' ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-brand-primary)', true),
-                      flex: '0 0 auto',
-                      fontFamily: MONO,
-                    },
-                    title: updateBadgeTitle(update, t),
-                  }, t('updateAvailable') + ' ' + update.to)
                 : null,
             ),
             h('div', { style: style.pluginSub, title: row.pkg || row.repo || '' }, row.pkg || row.repo || '—'),
@@ -3143,7 +3270,23 @@ window.__ModuleLoader__.load({
               : null,
           )
         }
-        if (column.key === 'category') return categoryText(row.category, lang)
+        if (column.key === 'category') {
+          // 分类以前是一行灰字。同一屏里"界面增强 / 技能包 / 记忆"全是同色，
+          // 扫读时只能逐行读字。现在按语义分组着色 —— 一眼分出能力类 / 外观类 / 知识类。
+          const label = categoryText(row.category, lang)
+          if (!label) return h(NoData, { note: t('noData') })
+          const color = categoryColor(row.category)
+          return h('span', {
+            style: {
+              ...style.badge(color, true),
+              fontSize: 11,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: '100%',
+            },
+          }, label)
+        }
         if (column.key === 'version') {
           return row.version
             ? h('span', { title: row.version, style: { display: 'block', fontFamily: MONO, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.version)
@@ -4462,10 +4605,35 @@ window.__ModuleLoader__.load({
       const repo = repoInfo || {}
       const stats = githubStats || null
 
+      // README 快捷方式：拼到仓库地址上，没有仓库就退回本地文件路径提示。
+      // 不内嵌 README 全文 —— 那是几百行 Markdown，面板里渲染成本高、
+      // 也会把设置页撑成第二个文档站。给一个直达入口就够了。
+      const readmeButton = (label) => {
+        const base = typeof repo.url === 'string' ? repo.url.replace(/\/$/, '') : null
+        if (!base) {
+          return h('span', { style: { ...style.muted, fontSize: 11.5 } }, 'README.md')
+        }
+        return h('a', {
+          href: base + '#readme',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          style: buttonStyle(true, false, true),
+        }, label)
+      }
+
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 } },
         h('div', null,
           h('div', { style: { fontSize: 15, fontWeight: 650 } }, t('settingsTitle')),
           h('div', { style: { ...style.muted, fontSize: 11.5, marginTop: 2 } }, t('settingsIntro'))),
+
+        // 「关于」放最前面：插件是干什么的、README 在哪，是用户第一次进设置页
+        // 最需要看的两件事。原来那句话挂在页头副标题上，每页都占一行却没人读第二遍。
+        h('div', { style: card },
+          h('div', { style: { fontSize: 13, fontWeight: 600 } }, t('settingsAbout')),
+          h('div', { style: { fontSize: 12, lineHeight: 1.65, color: 'var(--dsw-alias-label-secondary)' } }, t('settingsAboutBody')),
+          h('div', { style: rowStyle },
+            h('span', { style: { ...style.muted, fontSize: 11.5 } }, t('settingsReadmeHint')),
+            readmeButton(t('settingsReadme')))),
 
         h('div', { style: card },
           h('div', { style: { fontSize: 13, fontWeight: 600 } }, t('settingsRefresh')),
@@ -6119,7 +6287,12 @@ window.__ModuleLoader__.load({
             { style: style.header },
             h('div', null,
               h('h1', { style: style.title }, t('title')),
-              h('p', { style: style.subtitle }, t('subtitle')),
+              // 副标题原来占一整行（"聚合 DSH 1024Store、dshfind…"），把下面真正的
+              // 数据区往下推了 40+ px，而它每次看到都一样、没有信息量。
+              // 说明文字移到「设置」页；这里只在首次同步前给一句更短的引导。
+              !cacheAt && !rows.length
+                ? h('p', { style: { ...style.subtitle, marginTop: 2 } }, t('subtitleShort'))
+                : null,
             ),
             h(
               'div',
@@ -6140,7 +6313,9 @@ window.__ModuleLoader__.load({
                 : null,
               sync?.running
                 ? h('button', { type: 'button', style: buttonStyle(false, false, true), onClick: () => void cancelSync() }, t('cancel'))
-                : h('button', { type: 'button', style: buttonStyle(false, syncing || sync?.running, true), onClick: () => void startSync({ force: false }), disabled: syncing || sync?.running }, t('resync')),
+                // 「重新同步」是这一页的主操作：目录过期时它是唯一的出路。
+                // 原来和「导出 CSV」同一个灰样式，用户得读字才知道哪个该点。
+                : h('button', { type: 'button', style: buttonStyle(true, syncing || sync?.running, true), onClick: () => void startSync({ force: false }), disabled: syncing || sync?.running }, t('resync')),
               h('button', { type: 'button', style: buttonStyle(false, !hasRows, true), onClick: exportCsv, disabled: !hasRows }, t('exportCsv')),
             ),
           ),

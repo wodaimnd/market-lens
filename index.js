@@ -1649,6 +1649,9 @@ export function apply(ctx) {
         to: official.latest,
         source: official.source,
         registry: official.registry || null,
+        // 目标版本的发布时间：界面据此决定"名字旁要不要冒绿点"。
+        // 只在一周内才算"新鲜"，超过就只保留按钮上的 ↑ x.y.z。
+        publishedAt: official.publishedAt || null,
         checkedAt: official.checkedAt || null,
       }
     }
@@ -1662,6 +1665,9 @@ export function apply(ctx) {
       to: cached.version,
       source: 'npm',
       registry: null,
+      // compat 缓存里没有发布时间：走这条路径的包不会冒绿点。
+      // 这是保守的正确方向 —— 没证据就不抢注意力。
+      publishedAt: null,
       checkedAt: cached.checkedAt || null,
     }
   }
