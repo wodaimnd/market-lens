@@ -117,6 +117,28 @@ describe('importSourceConfig：覆盖模式', () => {
     assert.equal(result.config.sources.filter((source) => source.builtin).length, BUILT_IN_SOURCES.length)
     assert.deepEqual(result.report.removed, ['custom-2'])
   })
+
+  it('孤儿 sourceCaches 随源一起清掉（0.12.0 起配置里带条件请求记录）', () => {
+    const base = config({
+      sources: [...config().sources, custom(), custom({ id: 'custom-2', url: 'https://b.example.com/x.json' })],
+      sourceCaches: {
+        'custom-1': { etag: '"a"', lastConfirmedAt: '2026-02-01T00:00:00.000Z' },
+        'custom-2': { etag: '"b"', lastConfirmedAt: '2026-02-01T00:00:00.000Z' },
+      },
+    })
+    const result = importSourceConfig(base, { sources: [custom()] }, { mode: 'replace' })
+    assert.equal(result.ok, true)
+    assert.equal(result.config.sourceCaches['custom-1'] !== undefined, true, '还活着的源要保留它的缓存记录')
+    assert.equal(result.config.sourceCaches['custom-2'], undefined, '被删掉的源不能留下孤儿 ETag 键')
+  })
+
+  it('没有 sourceCaches 字段的旧配置照常导入（0.12.0 之前）', () => {
+    const base = config()
+    delete base.sourceCaches
+    const result = importSourceConfig(base, { sources: [custom()] })
+    assert.equal(result.ok, true)
+    assert.equal(result.config.sourceCaches, undefined, '不该凭空造出这个字段')
+  })
 })
 
 describe('importSourceConfig：逐条校验', () => {

@@ -5482,6 +5482,7 @@ window.__ModuleLoader__.load({
             h('input', {
               ref: fileRef,
               type: 'file',
+              name: 'market-lens-rules-upload',
               accept: 'application/json,.json',
               style: { display: 'none' },
               onChange: (event) => {
@@ -6683,18 +6684,9 @@ window.__ModuleLoader__.load({
                               ? t('updateRunning') + ' ' + formatNumber(updatesStatus.done || 0) + '/' + formatNumber(updatesStatus.total)
                               : t('updateQueued'))
                           : t('updateCheck') + (availableUpdates ? ' (' + availableUpdates + ')' : '')),
-                        // 导入按钮留在工具栏之外：设置页已经有「导出 / 导入配置」，
-                        // 这里再放一份就是两个入口干同一件事，而且工具栏是高频操作区。
-                        h('input', {
-                          ref: fileInputRef,
-                          type: 'file',
-                          accept: 'application/json,.json',
-                          style: { display: 'none' },
-                          onChange: (event) => {
-                            const file = event.target.files && event.target.files[0]
-                            void importConfig(file)
-                          },
-                        }),
+                        // 导入的隐藏 file input 移到了视图树最外层（见弹层处的注释）：
+                        // 设置页的「导入配置」按钮也要能唤起文件选择器，
+                        // input 留在工具栏里时设置页上 fileInputRef.current 是 null，点了没反应。
                         h('button', { type: 'button', style: buttonStyle(false, activeCount === 0, true), onClick: clearFilters, disabled: activeCount === 0 }, t('clearFilters') + (activeCount ? ' (' + activeCount + ')' : '')),
                       ),
                       // 源级新鲜度：多源聚合下，某个源挂了会让它的条目「凭空消失」，
@@ -6761,51 +6753,53 @@ window.__ModuleLoader__.load({
                         ? h('div', { style: { ...style.muted, fontSize: 11.5, lineHeight: 1.6 } },
                             t('dataFrom') + ': ' + enabledSourceNames.join(' · '))
                         : null,
-                      openPopover?.type === 'sources'
-                        ? h(SourceManagerPopover, {
-                            anchor: openPopover.rect,
-                            status,
-                            onClose: () => setOpenPopover(null),
-                            onStatus: loadStatus,
-                            onSync: () => { setOpenPopover(null); void startSync({ force: false }) },
-                            onOpenSources: () => { setOpenPopover(null); setView('sources') },
-                            filters,
-                            setFilters,
-                            t,
-                            lang,
-                          })
-                        : null,
-                      openPopover?.type === 'columns'
-                        ? h(ColumnSettingsPopover, {
-                            anchor: openPopover.rect,
-                            onClose: () => setOpenPopover(null),
-                            visibility: columnVisibility,
-                            setVisibility: setColumnVisibility,
-                            onReset: () => {
-                              setColumnWidths({ ...DEFAULT_COLUMN_WIDTHS })
-                              setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY })
-                              setShowFilters(true)
-                            },
-                            showFilters,
-                            setShowFilters,
-                            t,
-                            lang,
-                          })
-                        : null,
-                      openPopover?.type === 'schedule'
-                        ? h(SchedulePopover, {
-                            anchor: openPopover.rect,
-                            status,
-                            onClose: () => setOpenPopover(null),
-                            onStatus: loadStatus,
-                            onSync: () => void startSync({ force: false }),
-                            t,
-                            lang,
-                          })
-                        : null,
                     ),
               ),
         ),
+        // 弹层挂在视图树最外层：设置页的「定时刷新」「列」按钮也会打开同一个弹层。
+        // 之前它们只渲染在表格分支里，设置页点了按钮 setState 了却没有对应渲染 —— 就是"点了没反应"。
+        openPopover?.type === 'sources'
+          ? h(SourceManagerPopover, {
+              anchor: openPopover.rect,
+              status,
+              onClose: () => setOpenPopover(null),
+              onStatus: loadStatus,
+              onSync: () => { setOpenPopover(null); void startSync({ force: false }) },
+              onOpenSources: () => { setOpenPopover(null); setView('sources') },
+              filters,
+              setFilters,
+              t,
+              lang,
+            })
+          : null,
+        openPopover?.type === 'columns'
+          ? h(ColumnSettingsPopover, {
+              anchor: openPopover.rect,
+              onClose: () => setOpenPopover(null),
+              visibility: columnVisibility,
+              setVisibility: setColumnVisibility,
+              onReset: () => {
+                setColumnWidths({ ...DEFAULT_COLUMN_WIDTHS })
+                setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY })
+                setShowFilters(true)
+              },
+              showFilters,
+              setShowFilters,
+              t,
+              lang,
+            })
+          : null,
+        openPopover?.type === 'schedule'
+          ? h(SchedulePopover, {
+              anchor: openPopover.rect,
+              status,
+              onClose: () => setOpenPopover(null),
+              onStatus: loadStatus,
+              onSync: () => void startSync({ force: false }),
+              t,
+              lang,
+            })
+          : null,
         detailId ? h(DetailDrawer, {
           id: detailId,
           onClose: () => setDetailId(null),
@@ -6822,6 +6816,19 @@ window.__ModuleLoader__.load({
             await Promise.all([loadStatus().catch(() => {}), loadCatalog().catch(() => {})])
           },
         }) : null,
+        // 隐藏的导入 file input：挂在最外层，任何页签的「导入配置」都能唤起文件选择器
+        // （之前只在表格工具栏里渲染，设置页点「导入配置」时 ref 是 null —— 又一个"点了没反应"）。
+        h('input', {
+          ref: fileInputRef,
+          type: 'file',
+          name: 'market-lens-config-import',
+          accept: 'application/json,.json',
+          style: { display: 'none' },
+          onChange: (event) => {
+            const file = event.target.files && event.target.files[0]
+            void importConfig(file)
+          },
+        }),
         manual ? h(ManualInstallWindow, { target: manual, t, lang, onClose: () => setManual(null) }) : null,
       )
     }

@@ -676,3 +676,52 @@ test('七个页签都能打开，且不渲染出占位垃圾', async () => {
     panel.restore()
   }
 })
+
+test('设置页：定时刷新 / 列 / 导入配置 三个按钮点下去真的有东西出现', async () => {
+  const panel = await mountPanel()
+  try {
+    let tree = await panel.render()
+    tree = await panel.openTab(tree, '设置')
+
+    // 回归背景：这三个弹层/file input 曾经只渲染在市场表格分支里，
+    // 设置页点了按钮 setState 了但视图树里没有对应渲染 —— 用户看到的就是「点了没反应」。
+    const FAKE_EVENT = { currentTarget: { getBoundingClientRect: () => ({ left: 10, top: 10, right: 90, bottom: 38, width: 80, height: 28 }) } }
+    const clickSettingsButton = async (label) => {
+      const button = findNode(tree, (node) => node.type === 'button' && node.props?.onClick && textOf(node).trim() === label)
+      assert.ok(button, '设置页找不到「' + label + '」按钮')
+      await button.props.onClick(FAKE_EVENT)
+      return panel.render()
+    }
+
+    tree = await clickSettingsButton('定时刷新')
+    assert.ok(
+      findNode(tree, (node) => node.props?.id === 'schedule' || (node.type === 'button' && textOf(node).trim() === '保存')),
+      '点「定时刷新」后应渲染出定时刷新弹层',
+    )
+
+    // 关掉弹层再开下一个：一次只能开一个（再点同一个或别的都会换）
+    tree = await clickSettingsButton('列')
+    assert.match(
+      textOf(tree),
+      /在表头显示筛选按钮/,
+      '点「列」后应渲染出列设置弹层（弹层里独有「在表头显示筛选按钮」开关）',
+    )
+    assert.doesNotMatch(
+      textOf(tree),
+      /保存/,
+      '列弹层打开时定时刷新弹层应已关闭（openPopover 换了类型）',
+    )
+
+    tree = await panel.openTab(tree, '市场')
+    const fileInput = findNode(tree, (node) => node.type === 'input' && node.props?.type === 'file' && node.props?.name === 'market-lens-config-import')
+    assert.ok(fileInput, '配置导入的隐藏 file input 应挂在视图树最外层（任何页签都在）')
+    assert.ok(typeof fileInput.props.onChange === 'function', 'file input 要有 onChange（导入的入口）')
+
+    // 设置页上的 file input 同样可见：这就是「导入配置」按钮真正依赖的东西
+    tree = await panel.openTab(tree, '设置')
+    const fileInputOnSettings = findNode(tree, (node) => node.type === 'input' && node.props?.type === 'file' && node.props?.name === 'market-lens-config-import')
+    assert.ok(fileInputOnSettings, '设置页上也要有配置导入的 file input（fileInputRef 非 null，导入按钮才有反应）')
+  } finally {
+    panel.restore()
+  }
+})
